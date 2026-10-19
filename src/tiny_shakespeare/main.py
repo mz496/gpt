@@ -19,9 +19,15 @@ generate with a (1, 1) zero tensor to get, say, 100 new chars in the time dimens
 now you have a (1, 100) tensor, decode it.
 """
 
+from dataclasses import dataclass
 from urllib.request import urlopen
+import numpy as np
+from numpy.random import Generator
 
 def get_data() -> tuple[str, str, list[str]]:
+    """
+    Fetch tiny Shakespeare data.
+    """
     url = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
     with urlopen(url) as f:
         data: str = f.read().decode("utf-8")
@@ -46,7 +52,22 @@ def decode(tokens: list[int], vocab: list[str]) -> str:
     id_to_token = {i: tok for i, tok in enumerate(vocab)}
     return "".join([id_to_token[id] for id in tokens])
 
+@dataclass
+class Example:
+    context: list[int]
+    target: int
+
+def get_batch(tokenized: list[int], rng: Generator, batch_size: int, context_size: int) -> list[Example]:
+    """
+    Pull `batch_size` windows of length `context_size` starting at random points in `tokenized`.
+    """
+    # Get `batch_size` random ints from [0,n-context_size)
+    starts: list[int] = rng.integers(0, len(tokenized) - context_size, size=batch_size).tolist()
+    return [Example(context=tokenized[i:i+context_size], target=tokenized[i+context_size]) for i in starts]
+
 def main():
+    rng = np.random.default_rng(1337)
+
     # Grab shakespeare input
     # Split by train, validation
     train, validation, vocab = get_data()
@@ -56,12 +77,14 @@ def main():
     print(vocab)
 
     # Tokenize input by characters, let's start with per-character with a vocab size C (roughly A-za-z plus punctuation so ~65)
-
-
+    tokenized = encode(train, vocab)
 
     # Training examples (with some parameter T(time) for length, and B(batch_size) for how many)
     # - sample B random slices of the validation set of length T
     # - every example is then (input=slice[:i], output=slice[i]) - starting from length 1 up to B, so we can predict any length sequence
+    batch = get_batch([1,2,3,4,5,6,7,8,9,10], rng, batch_size=3, context_size=2)
+    for e in batch:
+        print(e)
 
     # Build bigram model:
     # - init: an embedding of C*C - which is the char that most likely follows C?
