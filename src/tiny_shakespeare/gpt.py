@@ -56,10 +56,28 @@ def estimate_loss(model: torch.nn.Module, tokenized_train_data: torch.Tensor, to
     return result
 
 
-# Build bigram:
+# Build gpt:
+# Roughly up until 38:00
+# Starting from the bigram model:
 # - init: a simple embedding of C*C - for each char, which is the char that most likely follows?
 # - forward pass on an input of size (B, T) gives logits, loss. You want a distribution over tokens C, which is the softmax logit among all of C?
 # - generation is: given some (B, T) input, generate max_new_tokens by continually extending the sequence that many times
+#
+# Roughly 58:00 - 1:19:00
+# Add:
+# - "number of embedding dimensions": the token embedding goes from vocab_size -> n_embd. Thus every token indexes to an embedding of size n_embd.
+# - then via an lm_head "language model head" Linear layer of size n_embd back to vocab_size
+# - position embedding table that also goes from block_size -> n_embd, so every position gets its own embedding of size n_embd too.
+# 
+# Self-attention heads
+# - query, key, value of size (B, T, head_size) - independently produced by every pos in the (B, T) inputs
+#   - query: "what am I looking for"
+#   - key: "what do I contain". s.t. query @ key = weights
+#   - value: "here is what I will communicate to you"
+# Attention(Q, K, V) = softmax(Q * K^T / sqrt(d_k)) * V
+# (this is per-batch)
+# i.e. scale down by the head_size so that the softmax does not sharpen towards the max too much, since Q*K^T is on the order of head_size.
+
 class GPT(torch.nn.Module):
 
     def __init__(self, vocab: list[str]):
