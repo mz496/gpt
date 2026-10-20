@@ -11,9 +11,17 @@ BATCH_SIZE = 4
 # what is the max context length for predictions?
 BLOCK_SIZE = 8
 LEARNING_RATE = 1e-3
+# for loss estimation
+EVAL_ITERS = 200
 
+def get_device():
+    return (
+        "cuda" if torch.cuda.is_available()
+        else "mps" if torch.backends.mps.is_available()
+        else "cpu"
+    )
 
-def bigram_batch(tokenized: torch.Tensor, batch_size: int, block_size: int) -> tuple[torch.Tensor, torch.Tensor]:
+def get_batch(tokenized: torch.Tensor, batch_size: int, block_size: int) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Pull `batch_size` windows of length `block_size` starting at random points in `tokenized`.
 
@@ -28,6 +36,24 @@ def bigram_batch(tokenized: torch.Tensor, batch_size: int, block_size: int) -> t
     x = torch.stack([tokenized[i:i+block_size] for i in starts])
     y = torch.stack([tokenized[i+1:i+block_size+1] for i in starts])
     return x, y
+
+@torch.no_grad
+def estimate_loss(model: torch.nn.Module, tokenized_train_data: torch.Tensor, tokenized_val_data: torch.Tensor) -> dict[str, float]:
+    """
+    Estimate loss over train, validation based on EVAL_ITERS batches.
+    """
+    model.eval()
+    result: dict[str, float] = {}
+    for dataset_type, data in [("train", tokenized_train_data), ("validation", tokenized_val_data)]:
+        # Compute the mean per dataset type.
+        losses = torch.zeros(EVAL_ITERS)
+        for k in range(EVAL_ITERS):
+            contexts, targets = get_batch(data, BATCH_SIZE, BLOCK_SIZE)
+            _logits, loss = model(contexts, targets)
+            losses[k] = loss
+        result[dataset_type] = losses.mean().item()
+    model.train()
+    return result
 
 
 # Build bigram model:
@@ -98,23 +124,22 @@ class BigramModel(torch.nn.Module):
 
         return output
 
-def train(step_count: int, train_data: str, vocab: list[str]) -> BigramModel:
-    tokenized = torch.tensor(encode(train_data, vocab))
-
-    model = BigramModel(vocab)
+def train(step_count: int, train_data: str, validation_data: str, vocab: list[str], device: str) -> BigramModel:
+    model = BigramModel(vocab).to(device)
+    tokenized_train_data = torch.tensor(encode(train_data, vocab)).to(device)
+    tokenized_val_data = torch.tensor(encode(validation_data, vocab)).to(device)
     # A reasonable lr for adam is 1e-3 to 1e-4.
     optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE)
     for step in range(step_count):
         # Zero out gradients for this iteration.
         model.zero_grad()
 
-        contexts, targets = bigram_batch(tokenized, batch_size=BATCH_SIZE, block_size=BLOCK_SIZE)
-        logits, loss = model(contexts, targets)
-        # expect logits shape [B, T, C] = [4, 8, 65]
+        contexts, targets = get_batch(tokenized_train_data, batch_size=BATCH_SIZE, block_size=BLOCK_SIZE)
+        _logits, loss = model(contexts, targets)
+        # expect logits shape [B, T, C]
         # An untrained model is near-uniform over C tokens, so loss should start near ~ln(C)
-        if step % 10 == 0:
-            # NOTE: Karpathy writes a @torch.no_grad estimate_loss fn, looking at different blocks of data out of each split.
-            print(f"step={step:03d} loss={loss.item():.3f} expected init ~{math.log(len(vocab)):.3f}")
+        if step % 100 == 0:
+            print(f"step={step:04d} loss={estimate_loss(model, tokenized_train_data, tokenized_val_data)} expected init ~{math.log(len(vocab)):.3f}")
 
         # Write in gradients based on how bad this iteration was.
         loss.backward()
@@ -123,13 +148,18 @@ def train(step_count: int, train_data: str, vocab: list[str]) -> BigramModel:
         optimizer.step() # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
     return model
 
-if __name__ == "__main__":
+def main():
     torch.manual_seed(1337)  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
-    train_data, _validation_data, vocab = get_data()
+    train_data, validation_data, vocab = get_data()
+    device = get_device()
+    print(f"available device: {device}")
 
-    model = train(10000, train_data, vocab)
+    model = train(10000, train_data, validation_data, vocab, device)
 
-    idx = torch.zeros((1, 1), dtype=torch.long)
+    idx = torch.zeros((1, 1), dtype=torch.long).to(device)
     result_tokens = model.generate(idx, max_tokens=1000)
-    result = decode(result_tokens[0].tolist(), vocab)
+    result = decode(result_tokens[0].tolist(), vocab)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType] Bad torch type stubs.
     print(result)
+
+if __name__ == "__main__":
+    main()
