@@ -66,27 +66,3 @@ def get_batch(tokenized: list[int], rng: Generator, batch_size: int, context_siz
     # Get `batch_size` random ints from [0,n-context_size)
     starts: list[int] = rng.integers(0, len(tokenized) - context_size, size=batch_size).tolist()
     return [Example(context=tokenized[i:i+context_size], target=tokenized[i+context_size]) for i in starts]
-
-def main():
-    rng = np.random.default_rng(1337)
-    torch.manual_seed(1337) # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
-
-    # Grab shakespeare input
-    # Split by train, validation
-    train, validation, vocab = get_data()
-    
-    print(len(train))
-    print(len(validation))
-    print(vocab)
-
-    # Tokenize input by characters, let's start with per-character with a vocab size C (roughly A-za-z plus punctuation so ~65)
-    tokenized = encode(train, vocab)
-
-    # Training examples (with some parameter T(time) for length, and B(batch_size) for how many)
-    # - sample B random slices of the validation set of length T
-    # - every example is then (input=slice[:i], output=slice[i]) - starting from length 1 up to B, so we can predict any length sequence
-    # generate with a (1, 1) zero tensor to get, say, 100 new chars in the time dimension.
-    # now you have a (1, 100) tensor, decode it.
-
-if __name__ == "__main__":
-    main()
