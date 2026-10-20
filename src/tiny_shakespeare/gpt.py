@@ -35,7 +35,11 @@ def get_batch(tokenized: torch.Tensor, batch_size: int, block_size: int) -> tupl
     Returns two tensors (contexts, targets) of size [B, T]
     - B = batch_size
     - T = block_size
-    where the token that follows context[i][j] is targets[i][j].
+    where targets[i][j] is the token that follows the prefix context[i][:j+1].
+
+    NOTE: In the bigram model we ignore everything except the final char for predictions.
+    i.e. our examples are of the form (context[i][j], targets[i][j])
+    It sets us up to start using the whole prefix (i.e. is no longer a bigram model).
     """
     # [B] random numbers drawn from [0, n-block_size)
     # Do we need to prevent wraparound here...?
