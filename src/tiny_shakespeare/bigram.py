@@ -1,9 +1,8 @@
 import math
-
 import torch
 from torch.nn import functional as F
 
-from .main import encode, get_data
+from .main import decode, encode, get_data
 
 
 def bigram_batch(tokenized: torch.Tensor, batch_size: int, block_size: int) -> tuple[torch.Tensor, torch.Tensor]:
@@ -34,57 +33,68 @@ class BigramModel(torch.nn.Module):
         # A simple embedding of C*C learnable params - for each char, which is the char that most likely follows?
         self.embedding = torch.nn.Embedding(num_embeddings=len(vocab), embedding_dim=len(vocab))
 
-    def forward(self, contexts: torch.Tensor, targets: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, idx: torch.Tensor, targets: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Input:
-        - contexts: [B, T] of tokens where
-        - B is the number of batches
-        - T is the context length per-sample
+        - idx: [B, T] of tokens where
+            - B is the number of batches
+            - T is the context length per-sample
         - targets: [B, T]
         
         Returns:
-        - logits (a distribution over vocab of size C)
+        - logits ([B, T, C] a distribution over vocab of size C)
         - loss (float)
         """
-        # (B, T, C) - the |C| size embedding for every element of the input (B, T)
-        logits = self.embedding(contexts)
+        # [B, T, C] - the |C| size embedding for every element of the input [B, T]
+        logits = self.embedding(idx)
 
         # cross_entropy expects input of size [|batch|, C] and targets of size [|batch|] (where the value is then treated as a 1-hot)
+        # https://docs.pytorch.org/docs/2.14/generated/torch.nn.functional.cross_entropy.html
         B, T, C = logits.shape
         loss = F.cross_entropy(logits.view(B*T, C), targets.view(B*T,))
         return logits, loss
 
-    def generate(self, contexts: torch.Tensor, max_tokens: int):
+    def generate(self, idx: torch.Tensor, max_tokens: int):
         """
-        TODO: Using the model's weights, generate up to `max_tokens` chars per batch.
+        Using the model's learned weights, generate up to `max_tokens` chars per batch.
+        Inputs
+        - idx: [B, T] "indices into the vocab".
+
+        Outputs
+        - [B, T+max_tokens]
         """
-        pass
+        if max_tokens <= 0:
+            raise Exception("max_tokens must be > 0")
 
+        output = idx
+        for _ in range(max_tokens):
+            # Build up predictions for each context from the last char on each.
+            # [B, T, C] - the |C| size embedding for every element of the input [B, T]
+            # Note that the exact value of T increases as we go.
+            logits = self.embedding(output)
 
-def main():
-    torch.manual_seed(1337)  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
+            # Extract the T-th col into a [B, C] - for each batch, the distribution that the embedding gives over the |C| sized vocab.
+            # Convert those into a prob distribution over the vocab dimension (since logits may be negative).
+            # Draw from this T-th col to get the (T+1)-th.
+            # https://docs.pytorch.org/docs/2.14/generated/torch.multinomial.html
+            # "The rows of input do not need to sum to one (in which case we use the values as weights), but must be non-negative, finite and have a non-zero sum."
+            # "If input is a matrix with m rows, out is an matrix of shape (m * num_samples)"
+            last_col_logits = logits[:, -1, :]
+            last_col_probs = F.softmax(last_col_logits, dim=-1)
+            next_tokens = torch.multinomial(input=last_col_probs, num_samples=1)
 
-    train, _validation, vocab = get_data()
-    tokenized = torch.tensor(encode(train, vocab))
+            # Append to each batch along the time dimension.
+            # torch.cat allocates a new tensor, so no need to .clone().
+            output = torch.cat([output, next_tokens], dim=1)
 
-    contexts, targets = bigram_batch(tokenized, batch_size=4, block_size=8)
-    model = BigramModel(vocab)
-    logits, loss = model(contexts, targets)
+        return output
 
-    print(logits.shape)  # expect [B, T, C] = [4, 8, 65]
-    # An untrained model is near-uniform over C tokens, so loss should be ~ln(C).
-    print(f"loss={loss.item():.3f} expected~{math.log(len(vocab)):.3f}")
-
-def train():
-    torch.manual_seed(1337)  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
-
-    train, _validation, vocab = get_data()
-    tokenized = torch.tensor(encode(train, vocab))
+def train(step_count: int, train_data: str, vocab: list[str]) -> BigramModel:
+    tokenized = torch.tensor(encode(train_data, vocab))
 
     model = BigramModel(vocab)
     # A reasonable lr for adam is 1e-3 to 1e-4.
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
-    step_count = 10000
     for step in range(step_count):
         # Zero out gradients for this iteration.
         model.zero_grad()
@@ -101,7 +111,15 @@ def train():
 
         # Update weights with those gradients.
         optimizer.step() # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
-
+    return model
 
 if __name__ == "__main__":
-    train()
+    torch.manual_seed(1337)  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
+    train_data, _validation_data, vocab = get_data()
+
+    model = train(10000, train_data, vocab)
+
+    idx = torch.zeros((1, 1), dtype=torch.long)
+    result_tokens = model.generate(idx, max_tokens=1000)
+    result = decode(result_tokens[0].tolist(), vocab)
+    print(result)
