@@ -5,7 +5,9 @@ from torch.nn import functional as F
 from .utils import decode, encode, get_data
 
 # --- hyperparameters ---
+
 # Training
+TRAIN_STEPS = 1000
 # how many independent sequences will we look at in parallel?
 BATCH_SIZE = 4
 # what is the max context length for predictions?
@@ -13,6 +15,11 @@ BLOCK_SIZE = 8
 LEARNING_RATE = 1e-3
 # for loss estimation
 EVAL_ITERS = 200
+
+# Model
+# number of embedding dimensions
+N_EMBD = 32
+# ---
 
 def get_device():
     return (
@@ -65,7 +72,7 @@ def estimate_loss(model: torch.nn.Module, tokenized_train_data: torch.Tensor, to
 #
 # Roughly 58:00 - 1:19:00
 # Add:
-# - "number of embedding dimensions": the token embedding goes from vocab_size -> n_embd. Thus every token indexes to an embedding of size n_embd.
+# - "number of embedding dimensions": the token embedding goes from vocab_size -> n_embd. Thus every token in the vocab indexes to an embedding of size n_embd.
 # - then via an lm_head "language model head" Linear layer of size n_embd back to vocab_size
 # - position embedding table that also goes from block_size -> n_embd, so every position gets its own embedding of size n_embd too.
 # 
@@ -80,11 +87,33 @@ def estimate_loss(model: torch.nn.Module, tokenized_train_data: torch.Tensor, to
 
 class GPT(torch.nn.Module):
 
-    def __init__(self, vocab: list[str]):
+    def __init__(self, vocab_size: int):
         super().__init__()
-        # A simple lookup table of C*C learnable params - for each char, which is the char that most likely follows?
-        # Each token directly reads off the logits for the next token from this.
-        self.embedding = torch.nn.Embedding(num_embeddings=len(vocab), embedding_dim=len(vocab))
+        self.token_embedding = torch.nn.Embedding(num_embeddings=vocab_size, embedding_dim=N_EMBD)
+        self.position_embedding = torch.nn.Embedding(num_embeddings=BLOCK_SIZE, embedding_dim=N_EMBD)
+        # "Encodes token and position into N_EMBD dimensions and back out"
+        self.lm_head = torch.nn.Linear(N_EMBD, vocab_size)
+    
+    def _embed(self, idx: torch.Tensor):
+        device = get_device()
+
+        _B, T = idx.shape
+        # C := N_EMBD
+        # token embedding:
+        # [B, T] in
+        # [B, T, C] out: the N_EMBD-size embeddings for every element of the input [B, T]
+        tok_emb = self.token_embedding(idx)
+        # pos embedding:
+        # [T] in: just [0..T-1] to index into position embedding.
+        # [T, C] out: the N_EMBD-size embeddings for every position from 0 to T
+        pos_emb = self.position_embedding(torch.arange(0, T).to(device))
+        # (broadcast these across the B batches)
+        x = tok_emb + pos_emb
+        # language model head:
+        # [B, T, C] in, as a combination of both "what is the token" and "what is the position" at every element
+        # [B, T, vocab size] out
+        logits = self.lm_head(x)
+        return logits
 
     def forward(self, idx: torch.Tensor, targets: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -98,13 +127,14 @@ class GPT(torch.nn.Module):
         - logits ([B, T, C] a distribution over vocab of size C)
         - loss (float)
         """
-        # [B, T, C] - the |C| size embedding for every element of the input [B, T]
-        logits = self.embedding(idx)
+        logits = self._embed(idx)
+        B, T, vocab_size = logits.shape
 
-        # cross_entropy expects input of size [|batch|, C] and targets of size [|batch|] (where the value is then treated as a 1-hot)
+        # cross_entropy expects input of size [|batch|, num_classes] and targets of size [|batch|] (where the value is then treated as a 1-hot)
         # https://docs.pytorch.org/docs/2.14/generated/torch.nn.functional.cross_entropy.html
-        B, T, C = logits.shape
-        loss = F.cross_entropy(logits.view(B*T, C), targets.view(B*T,))
+        # explicitly calling it vocab_size as that's what it is (instead of reusing "C")
+        _, _, vocab_size = logits.shape
+        loss = F.cross_entropy(logits.view(B*T, vocab_size), targets.view(B*T,))
         return logits, loss
 
     def generate(self, idx: torch.Tensor, max_tokens: int):
@@ -121,12 +151,15 @@ class GPT(torch.nn.Module):
 
         output = idx
         for _ in range(max_tokens):
-            # Build up predictions for each context from the last char on each.
-            # [B, T, C] - the |C| size embedding for every element of the input [B, T]
-            # Note that the exact value of T increases as we go.
-            logits = self.embedding(output)
+            # TODO[attention]: Fix; these are wrong now that we have the 2 types of embeddings.
 
-            # Extract the T-th col into a [B, C] - for each batch, the distribution that the embedding gives over the |C| sized vocab.
+            # Build up predictions for each context from the last char on each.
+            # `output` grows from [B, T] -> [B, T+max_tokens]
+            # So we need to look at only the last BLOCK_SIZE.
+            output_last_block = output[:, -BLOCK_SIZE:]
+            logits = self._embed(output_last_block)
+
+            # Extract the T-th col into a [B, vocab_size] - for each batch, the distribution that the embedding gives over the vocab.
             # Convert those into a prob distribution over the vocab dimension (since logits may be negative).
             # Draw from this T-th col to get the (T+1)-th.
             # https://docs.pytorch.org/docs/2.14/generated/torch.multinomial.html
@@ -143,7 +176,7 @@ class GPT(torch.nn.Module):
         return output
 
 def train(step_count: int, train_data: str, validation_data: str, vocab: list[str], device: str) -> GPT:
-    model = GPT(vocab).to(device)
+    model = GPT(len(vocab)).to(device)
     tokenized_train_data = torch.tensor(encode(train_data, vocab)).to(device)
     tokenized_val_data = torch.tensor(encode(validation_data, vocab)).to(device)
     # A reasonable lr for adam is 1e-3 to 1e-4.
@@ -156,8 +189,8 @@ def train(step_count: int, train_data: str, validation_data: str, vocab: list[st
         _logits, loss = model(contexts, targets)
         # expect logits shape [B, T, C]
         # An untrained model is near-uniform over C tokens, so loss should start near ~ln(C)
-        if step % 100 == 0:
-            print(f"step={step:04d} loss={estimate_loss(model, tokenized_train_data, tokenized_val_data)} expected init ~{math.log(len(vocab)):.3f}")
+        if step % 100 == 0 or step == step_count-1:
+            print(f"step={step:04d} loss={estimate_loss(model, tokenized_train_data, tokenized_val_data)}")
 
         # Write in gradients based on how bad this iteration was.
         loss.backward()
@@ -172,7 +205,7 @@ def main():
     device = get_device()
     print(f"available device: {device}")
 
-    model = train(10000, train_data, validation_data, vocab, device)
+    model = train(TRAIN_STEPS, train_data, validation_data, vocab, device)
 
     idx = torch.zeros((1, 1), dtype=torch.long).to(device)
     result_tokens = model.generate(idx, max_tokens=1000)

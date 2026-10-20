@@ -3,3 +3,6 @@ test *args:
 
 bigram *args:
     uv run --locked -m src.tiny_shakespeare.bigram {{args}}
+
+gpt *args:
+    uv run --locked -m src.tiny_shakespeare.gpt {{args}}
