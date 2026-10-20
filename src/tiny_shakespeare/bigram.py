@@ -2,7 +2,7 @@ import math
 import torch
 from torch.nn import functional as F
 
-from .main import decode, encode, get_data
+from .utils import decode, encode, get_data
 
 # --- hyperparameters ---
 # Training
