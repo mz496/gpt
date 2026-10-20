@@ -4,6 +4,14 @@ from torch.nn import functional as F
 
 from .main import decode, encode, get_data
 
+# --- hyperparameters ---
+# Training
+# how many independent sequences will we look at in parallel?
+BATCH_SIZE = 4
+# what is the max context length for predictions?
+BLOCK_SIZE = 8
+LEARNING_RATE = 1e-3
+
 
 def bigram_batch(tokenized: torch.Tensor, batch_size: int, block_size: int) -> tuple[torch.Tensor, torch.Tensor]:
     """
@@ -30,7 +38,8 @@ class BigramModel(torch.nn.Module):
 
     def __init__(self, vocab: list[str]):
         super().__init__()
-        # A simple embedding of C*C learnable params - for each char, which is the char that most likely follows?
+        # A simple lookup table of C*C learnable params - for each char, which is the char that most likely follows?
+        # Each token directly reads off the logits for the next token from this.
         self.embedding = torch.nn.Embedding(num_embeddings=len(vocab), embedding_dim=len(vocab))
 
     def forward(self, idx: torch.Tensor, targets: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -94,16 +103,17 @@ def train(step_count: int, train_data: str, vocab: list[str]) -> BigramModel:
 
     model = BigramModel(vocab)
     # A reasonable lr for adam is 1e-3 to 1e-4.
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE)
     for step in range(step_count):
         # Zero out gradients for this iteration.
         model.zero_grad()
 
-        contexts, targets = bigram_batch(tokenized, batch_size=4, block_size=8)
+        contexts, targets = bigram_batch(tokenized, batch_size=BATCH_SIZE, block_size=BLOCK_SIZE)
         logits, loss = model(contexts, targets)
         # expect logits shape [B, T, C] = [4, 8, 65]
         # An untrained model is near-uniform over C tokens, so loss should start near ~ln(C)
         if step % 10 == 0:
+            # NOTE: Karpathy writes a @torch.no_grad estimate_loss fn, looking at different blocks of data out of each split.
             print(f"step={step:03d} loss={loss.item():.3f} expected init ~{math.log(len(vocab)):.3f}")
 
         # Write in gradients based on how bad this iteration was.
