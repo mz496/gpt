@@ -21,14 +21,19 @@ Attention(Q, K, V) = softmax(Q * K^T / sqrt(d_k)) * V
 (this is per-batch)
 i.e. scale down by the head_size so that the softmax does not sharpen towards the max too much, since Q*K^T is on the order of head_size.
 
+From here you can get validation loss down to 2.4-2.5 ish.
+
 1:22:00
-- Multi-head attention
+- Multi-head attention. Validation loss down to 2.26 ish
 
 1:24:00
-- Feed-forward step
+- Feed-forward step. Validation loss down to 2.24 ish
 
 1:26:30
-- Multiple blocks of this
+- Multiple blocks of this. Validation loss creeps up again to 2.38 ish
+
+1:28:00
+- Residual stream/skip connections
 """
 
 import torch
@@ -170,6 +175,27 @@ class MultiHeadAttention(torch.nn.Module):
         # [B, T, C] out
         return torch.cat([h(x) for h in self.heads], dim=-1)
 
+class Block(torch.nn.Module):
+    """
+    Transformer block.
+    n_embd should be evenly divisible by n_heads.
+    """
+    def __init__(self, n_embd: int, n_heads: int):
+        super().__init__()
+        # Masked Multi-Head Attention
+        # The intuition is that we are letting attention run in this dimensional space
+        # With multi-head self-attention we subdivide into several smaller-dimensional spaces and concat them together
+        self.sa_heads = MultiHeadAttention(num_heads=n_heads, head_size=n_embd // n_heads)
+
+        # Feed Forward
+        # Note that these embedding dimensions are independently looking at one another, after the self-attention has done the cross-communication.
+        self.ffwd = FeedForward(N_EMBD)
+
+    def forward(self, x: torch.Tensor):
+        x = self.sa_heads(x)
+        x = self.ffwd(x)
+        return x
+
 class GPT(torch.nn.Module):
 
     def __init__(self, vocab_size: int):
@@ -179,14 +205,12 @@ class GPT(torch.nn.Module):
         self.token_embedding = torch.nn.Embedding(num_embeddings=vocab_size, embedding_dim=N_EMBD)
         self.position_embedding = torch.nn.Embedding(num_embeddings=BLOCK_SIZE, embedding_dim=N_EMBD)
 
-        # Masked Multi-Head Attention
-        # The intuition is that we are letting attention run in this dimensional space
-        # With multi-head self-attention we subdivide into several smaller-dimensional spaces and concat them together
-        self.sa_heads = MultiHeadAttention(num_heads=4, head_size=N_EMBD//4)
-
-        # Feed Forward
-        # Note that these embedding dimensions are independently looking at one another, after the self-attention has done the cross-communication.
-        self.ffwd = FeedForward(N_EMBD)
+        # Transformer blocks
+        self.blocks = torch.nn.Sequential(
+            Block(N_EMBD, n_heads=4),
+            Block(N_EMBD, n_heads=4),
+            Block(N_EMBD, n_heads=4),
+        )
 
         # Final linear layer
         # "Encodes token and position into N_EMBD dimensions and back out"
@@ -218,10 +242,8 @@ class GPT(torch.nn.Module):
         pos_emb = self.position_embedding(torch.arange(0, T).to(device))
         # (broadcast these across the B batches)
         x = tok_emb + pos_emb # [B, T, C]
-        # apply self-attention
-        x = self.sa_heads(x) # [B, T, C]
-        # apply feed-forward layer
-        x = self.ffwd(x) # [B, T, C]
+        # apply transformer blocks
+        x = self.blocks(x)
 
         # language model head:
         # [B, T, C] in, as a combination of both "what is the token" and "what is the position" at every element
