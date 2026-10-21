@@ -67,7 +67,7 @@ def estimate_loss(model: torch.nn.Module, tokenized_train_data: torch.Tensor, to
     return result
 
 
-# Build gpt:
+# Build a decoder-only gpt:
 # Roughly up until 38:00
 # Starting from the bigram model:
 # - init: a simple embedding of C*C - for each char, which is the char that most likely follows?
@@ -89,12 +89,54 @@ def estimate_loss(model: torch.nn.Module, tokenized_train_data: torch.Tensor, to
 # (this is per-batch)
 # i.e. scale down by the head_size so that the softmax does not sharpen towards the max too much, since Q*K^T is on the order of head_size.
 
+class Head(torch.nn.Module):
+
+    def __init__(self, head_size: int):
+        super().__init__()
+        self.head_size = head_size
+        # Each of the [B, T] will emit one of these.
+        self.query = torch.nn.Linear(N_EMBD, head_size)
+        self.key = torch.nn.Linear(N_EMBD, head_size)
+        self.value = torch.nn.Linear(N_EMBD, head_size)
+
+    def forward(self, idx: torch.Tensor):
+        """
+        Input size [B, T, N_EMBD]
+        Output size [B, T, N_EMBD]
+        
+        Implements self-attention: Attention(Q, K, V) = softmax(Q * K^T / sqrt(d_k)) * V
+        """
+        device = get_device()
+
+        # [B, T, C] -> [B, T, head_size]
+        _B, T, _C = idx.shape
+        q: torch.Tensor = self.query(idx)
+        k: torch.Tensor = self.key(idx)
+        v: torch.Tensor = self.value(idx)
+
+        # [B, T, head_size] * [B, head_size, T] = [B, T, T]
+        wei = q @ k.transpose(-2, -1) / (self.head_size ** 0.5)
+        # Masked-fill lower-triangular with -inf
+        mask = torch.tril(torch.ones(T, T)).to(device)
+        wei = wei.masked_fill(mask == 0, float("-inf"))
+        # Softmax per-row, ie the final dimension.
+        wei = F.softmax(wei, dim=-1)
+
+        # [B, T, T] * [B, T, head_size] = [B, T, head_size]
+        out = wei @ v
+        return out
+
 class GPT(torch.nn.Module):
 
     def __init__(self, vocab_size: int):
         super().__init__()
         self.token_embedding = torch.nn.Embedding(num_embeddings=vocab_size, embedding_dim=N_EMBD)
         self.position_embedding = torch.nn.Embedding(num_embeddings=BLOCK_SIZE, embedding_dim=N_EMBD)
+        # Self-attention head.
+        # For now just one head of size N_EMBD.
+        # The intuition is that we are letting attention run in this dimensional space
+        # - with multi-head self-attention we will subdivide the space later
+        self.sa_head = Head(N_EMBD)
         # "Encodes token and position into N_EMBD dimensions and back out"
         self.lm_head = torch.nn.Linear(N_EMBD, vocab_size)
     
@@ -112,7 +154,12 @@ class GPT(torch.nn.Module):
         # [T, C] out: the N_EMBD-size embeddings for every position from 0 to T
         pos_emb = self.position_embedding(torch.arange(0, T).to(device))
         # (broadcast these across the B batches)
+        # [B, T, C]
         x = tok_emb + pos_emb
+        # apply one head of self-attention
+        # [B, T, C] in
+        # [B, T, C] out
+        x = self.sa_head(x)
         # language model head:
         # [B, T, C] in, as a combination of both "what is the token" and "what is the position" at every element
         # [B, T, vocab size] out
@@ -155,8 +202,6 @@ class GPT(torch.nn.Module):
 
         output = idx
         for _ in range(max_tokens):
-            # TODO[attention]: Fix; these are wrong now that we have the 2 types of embeddings.
-
             # Build up predictions for each context from the last char on each.
             # `output` grows from [B, T] -> [B, T+max_tokens]
             # So we need to look at only the last BLOCK_SIZE.
