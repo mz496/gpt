@@ -88,9 +88,16 @@ def estimate_loss(model: torch.nn.Module, tokenized_train_data: torch.Tensor, to
 # Attention(Q, K, V) = softmax(Q * K^T / sqrt(d_k)) * V
 # (this is per-batch)
 # i.e. scale down by the head_size so that the softmax does not sharpen towards the max too much, since Q*K^T is on the order of head_size.
+#
+# 1:22:00
+# - Multi-head attention
 
 class Head(torch.nn.Module):
-    # Placed by register_buffer.
+    """
+    One head of self-attention.
+    """
+
+    # Placed by register_buffer in init, written here to satisfy typechecking on this field.
     tril: torch.Tensor
 
     def __init__(self, head_size: int):
@@ -127,24 +134,48 @@ class Head(torch.nn.Module):
         out = wei @ v
         return out
 
+class MultiHeadAttention(torch.nn.Module):
+    """
+    Multiple heads of self-attention running in parallel, concatenated together along the channel dimension.
+    """
+
+    def __init__(self, num_heads: int, head_size: int):
+        super().__init__()
+        self.heads = torch.nn.ModuleList([Head(head_size) for _ in range(num_heads)])
+
+    def forward(self, x: torch.Tensor):
+        # [B, T, C] in
+        # [B, T, C] out
+        return torch.cat([h(x) for h in self.heads], dim=-1)
+
 class GPT(torch.nn.Module):
 
     def __init__(self, vocab_size: int):
         super().__init__()
         self.token_embedding = torch.nn.Embedding(num_embeddings=vocab_size, embedding_dim=N_EMBD)
         self.position_embedding = torch.nn.Embedding(num_embeddings=BLOCK_SIZE, embedding_dim=N_EMBD)
-        # Self-attention head.
-        # For now just one head of size N_EMBD.
+        # Self-attention heads
         # The intuition is that we are letting attention run in this dimensional space
-        # - with multi-head self-attention we will subdivide the space later
-        self.sa_head = Head(N_EMBD)
+        # With multi-head self-attention we subdivide into several smaller-dimensional spaces and concat them together
+        self.sa_heads = MultiHeadAttention(num_heads=4, head_size=N_EMBD//4)
         # "Encodes token and position into N_EMBD dimensions and back out"
         self.lm_head = torch.nn.Linear(N_EMBD, vocab_size)
-    
-    def _embed(self, idx: torch.Tensor):
-        device = get_device()
 
-        _B, T = idx.shape
+    def forward(self, idx: torch.Tensor, targets: torch.Tensor | None) -> tuple[torch.Tensor, torch.Tensor | None]:
+        """
+        Input:
+        - idx: [B, T] of tokens where
+            - B is the number of batches
+            - T is the context length per-sample
+        - targets: [B, T]
+            - None if we are in generation mode in which case we do not calculate losses.
+        
+        Returns:
+        - logits ([B, T, C] a distribution over vocab of size C)
+        - loss (float)
+        """
+        device = get_device()
+        B, T = idx.shape
         # C := N_EMBD
         # token embedding:
         # [B, T] in
@@ -160,33 +191,22 @@ class GPT(torch.nn.Module):
         # apply one head of self-attention
         # [B, T, C] in
         # [B, T, C] out
-        x = self.sa_head(x)
+        x = self.sa_heads(x)
         # language model head:
         # [B, T, C] in, as a combination of both "what is the token" and "what is the position" at every element
         # [B, T, vocab size] out
         logits = self.lm_head(x)
-        return logits
 
-    def forward(self, idx: torch.Tensor, targets: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """
-        Input:
-        - idx: [B, T] of tokens where
-            - B is the number of batches
-            - T is the context length per-sample
-        - targets: [B, T]
-        
-        Returns:
-        - logits ([B, T, C] a distribution over vocab of size C)
-        - loss (float)
-        """
-        logits = self._embed(idx)
-        B, T, vocab_size = logits.shape
+        _B, _T, vocab_size = logits.shape
 
         # cross_entropy expects input of size [|batch|, num_classes] and targets of size [|batch|] (where the value is then treated as a 1-hot)
         # https://docs.pytorch.org/docs/2.14/generated/torch.nn.functional.cross_entropy.html
         # explicitly calling it vocab_size as that's what it is (instead of reusing "C")
         _, _, vocab_size = logits.shape
-        loss = F.cross_entropy(logits.view(B*T, vocab_size), targets.view(B*T,))
+        if targets is None:
+            loss = None
+        else:
+            loss = F.cross_entropy(logits.view(B*T, vocab_size), targets.view(B*T,))
         return logits, loss
 
     def generate(self, idx: torch.Tensor, max_tokens: int):
@@ -207,7 +227,7 @@ class GPT(torch.nn.Module):
             # `output` grows from [B, T] -> [B, T+max_tokens]
             # So we need to look at only the last BLOCK_SIZE.
             output_last_block = output[:, -BLOCK_SIZE:]
-            logits = self._embed(output_last_block)
+            logits, _loss = self(output_last_block, targets=None)
 
             # Extract the T-th col into a [B, vocab_size] - for each batch, the distribution that the embedding gives over the vocab.
             # Convert those into a prob distribution over the vocab dimension (since logits may be negative).
