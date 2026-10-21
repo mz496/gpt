@@ -90,14 +90,18 @@ def estimate_loss(model: torch.nn.Module, tokenized_train_data: torch.Tensor, to
 # i.e. scale down by the head_size so that the softmax does not sharpen towards the max too much, since Q*K^T is on the order of head_size.
 
 class Head(torch.nn.Module):
+    # Placed by register_buffer.
+    tril: torch.Tensor
 
     def __init__(self, head_size: int):
         super().__init__()
         self.head_size = head_size
         # Each of the [B, T] will emit one of these.
-        self.query = torch.nn.Linear(N_EMBD, head_size)
-        self.key = torch.nn.Linear(N_EMBD, head_size)
-        self.value = torch.nn.Linear(N_EMBD, head_size)
+        self.query = torch.nn.Linear(N_EMBD, head_size, bias=False)
+        self.key = torch.nn.Linear(N_EMBD, head_size, bias=False)
+        self.value = torch.nn.Linear(N_EMBD, head_size, bias=False)
+        # the max value along the T dimension; which we then slice according to what the actual input is.
+        self.register_buffer("tril", torch.tril(torch.ones(BLOCK_SIZE, BLOCK_SIZE)))
 
     def forward(self, idx: torch.Tensor):
         """
@@ -106,19 +110,16 @@ class Head(torch.nn.Module):
         
         Implements self-attention: Attention(Q, K, V) = softmax(Q * K^T / sqrt(d_k)) * V
         """
-        device = get_device()
-
         # [B, T, C] -> [B, T, head_size]
-        _B, T, _C = idx.shape
+        _B, T, C = idx.shape
         q: torch.Tensor = self.query(idx)
         k: torch.Tensor = self.key(idx)
         v: torch.Tensor = self.value(idx)
 
         # [B, T, head_size] * [B, head_size, T] = [B, T, T]
-        wei = q @ k.transpose(-2, -1) / (self.head_size ** 0.5)
+        wei = q @ k.transpose(-2, -1) * (C ** -0.5)
         # Masked-fill lower-triangular with -inf
-        mask = torch.tril(torch.ones(T, T)).to(device)
-        wei = wei.masked_fill(mask == 0, float("-inf"))
+        wei = wei.masked_fill(self.tril[:T, :T] == 0, float("-inf"))
         # Softmax per-row, ie the final dimension.
         wei = F.softmax(wei, dim=-1)
 
