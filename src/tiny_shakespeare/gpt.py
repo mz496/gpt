@@ -34,6 +34,9 @@ From here you can get validation loss down to 2.4-2.5 ish.
 
 1:28:00
 - Residual stream/skip connections
+
+1:33:00
+- LayerNorm
 """
 
 import torch
@@ -54,7 +57,7 @@ LEARNING_RATE = 1e-3
 EVAL_ITERS = 200
 
 # Model
-# number of embedding dimensions
+# number of embedding dimensions. In the paper, this is d_model.
 N_EMBD = 32
 # ---
 
@@ -107,12 +110,17 @@ class FeedForward(torch.nn.Module):
     """
     Feedforward linearity to 'make the model think on its attention steps' (? - wording from the video)
     FFN(x) = max(0, xW1 + b1)W2 + b2
+
+    In the paper the authors go up to d_ff = 4 times the d_model (which are larger than we use here).
+
+    Karpathy justifies the second linearity as the projection for the residual stream.
     """
     def __init__(self, n_embd: int):
         super().__init__()
         self.net = torch.nn.Sequential(
-            torch.nn.Linear(n_embd, n_embd),
-            torch.nn.ReLU()
+            torch.nn.Linear(n_embd, 4 * n_embd),
+            torch.nn.ReLU(),
+            torch.nn.Linear(4 * n_embd, n_embd)
         )
     
     def forward(self, x: torch.Tensor):
@@ -131,8 +139,10 @@ class Head(torch.nn.Module):
         super().__init__()
         self.head_size = head_size
         # Each of the [B, T] will emit one of these.
+        # In the paper, these are d_model * d_k. Query and key must be the same d_k because they get multiplied together as the 'dot product' attention.
         self.query = torch.nn.Linear(N_EMBD, head_size, bias=False)
         self.key = torch.nn.Linear(N_EMBD, head_size, bias=False)
+        # In the paper, this is d_model * d_v.
         self.value = torch.nn.Linear(N_EMBD, head_size, bias=False)
         # BLOCK_SIZE is the max value along the T dimension; which we then slice according to what the actual input is.
         self.register_buffer("tril", torch.tril(torch.ones(BLOCK_SIZE, BLOCK_SIZE)))
@@ -140,11 +150,11 @@ class Head(torch.nn.Module):
     def forward(self, idx: torch.Tensor):
         """
         Input size [B, T, N_EMBD]
-        Output size [B, T, N_EMBD]
+        Output size [B, T, head_size]
         
         Implements self-attention: Attention(Q, K, V) = softmax(Q * K^T / sqrt(d_k)) * V
         """
-        # [B, T, C] -> [B, T, head_size]
+        # [B, T, N_EMBD] -> [B, T, head_size]
         _B, T, C = idx.shape
         q: torch.Tensor = self.query(idx)
         k: torch.Tensor = self.key(idx)
@@ -169,11 +179,17 @@ class MultiHeadAttention(torch.nn.Module):
     def __init__(self, num_heads: int, head_size: int):
         super().__init__()
         self.heads = torch.nn.ModuleList([Head(head_size) for _ in range(num_heads)])
+        # Projection for the residual stream.
+        self.proj = torch.nn.Linear(N_EMBD, N_EMBD)
 
     def forward(self, x: torch.Tensor):
         # [B, T, C] in
-        # [B, T, C] out
-        return torch.cat([h(x) for h in self.heads], dim=-1)
+        # Head(head_size): [B, T, C] -> [B, T, head_size].
+        # num_heads of these concatted: [B, T, head_size * num_heads]
+        # - note that N_EMBD is subdivided evenly, so head_size * num_heads == N_EMBD
+        out = torch.cat([h(x) for h in self.heads], dim=-1)
+        out = self.proj(out)
+        return out
 
 class Block(torch.nn.Module):
     """
@@ -192,8 +208,12 @@ class Block(torch.nn.Module):
         self.ffwd = FeedForward(N_EMBD)
 
     def forward(self, x: torch.Tensor):
-        x = self.sa_heads(x)
-        x = self.ffwd(x)
+        # Relative to 1:26:00:
+        # Only adding these skip-connections with +, we can drop validation loss from the plateauing 2.38 to 2.16.
+        # With the residual stream projections, we can drop validation loss further to 2.04 (and 1.91 training loss which starts to signal overfitting).
+        # [B, T, C] in and out
+        x = x + self.sa_heads(x)
+        x = x + self.ffwd(x)
         return x
 
 class GPT(torch.nn.Module):
@@ -243,7 +263,7 @@ class GPT(torch.nn.Module):
         # (broadcast these across the B batches)
         x = tok_emb + pos_emb # [B, T, C]
         # apply transformer blocks
-        x = self.blocks(x)
+        x = self.blocks(x) # [B, T, C]
 
         # language model head:
         # [B, T, C] in, as a combination of both "what is the token" and "what is the position" at every element
