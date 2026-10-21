@@ -21,17 +21,18 @@ now you have a (1, 100) tensor, decode it.
 
 from dataclasses import dataclass
 from urllib.request import urlopen
-import numpy as np
 from numpy.random import Generator
-import torch
+from pathlib import Path
 
 def get_data() -> tuple[str, str, list[str]]:
     """
     Fetch tiny Shakespeare data.
     """
-    url = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
-    with urlopen(url) as f:
-        data: str = f.read().decode("utf-8")
+    # url = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
+    # with urlopen(url) as f:
+    #     data: str = f.read().decode("utf-8")
+    with open(Path(__file__).parent / "input.txt") as f:
+        data: str = f.read()
     n = len(data)
     train_split_len = int(n * 0.9)
     train = data[:train_split_len]
