@@ -77,9 +77,11 @@ def get_batch(tokenized: torch.Tensor, batch_size: int, block_size: int) -> tupl
     - T = block_size
     where targets[i][j] is the token that follows the prefix context[i][:j+1].
 
-    NOTE: In the bigram model we ignore everything except the final char for predictions.
-    i.e. our examples are of the form (context[i][j], targets[i][j])
-    It sets us up to start using the whole prefix (i.e. is no longer a bigram model).
+    NOTE:
+    In the bigram model, we ignore everything except the final char for predictions.
+      i.e. our examples are of the form (context[i][j], targets[i][j])
+    During self-attention, the way we build our training examples is exactly the same,
+      but the way we read off `context` changes to make the input a mixture of all of context[i][:j+1] instead.
     """
     # [B] random numbers drawn from [0, n-block_size)
     # Do we need to prevent wraparound here...?
@@ -130,6 +132,8 @@ class FeedForward(torch.nn.Module):
 class Head(torch.nn.Module):
     """
     One head of self-attention.
+
+    Intuition: In a head_size-dimensional space, let the model learn
     """
 
     # Placed by register_buffer in init, written here to satisfy typechecking on this field.
@@ -139,10 +143,10 @@ class Head(torch.nn.Module):
         super().__init__()
         self.head_size = head_size
         # Each of the [B, T] will emit one of these.
-        # In the paper, these are d_model * d_k. Query and key must be the same d_k because they get multiplied together as the 'dot product' attention.
+        # In the paper, the 1th dim is d_k. Query and key must be the same d_k because they get multiplied together as the 'dot product' attention.
         self.query = torch.nn.Linear(N_EMBD, head_size, bias=False)
         self.key = torch.nn.Linear(N_EMBD, head_size, bias=False)
-        # In the paper, this is d_model * d_v.
+        # In the paper, the 1th dim is d_v.
         self.value = torch.nn.Linear(N_EMBD, head_size, bias=False)
         # BLOCK_SIZE is the max value along the T dimension; which we then slice according to what the actual input is.
         self.register_buffer("tril", torch.tril(torch.ones(BLOCK_SIZE, BLOCK_SIZE)))
@@ -153,6 +157,20 @@ class Head(torch.nn.Module):
         Output size [B, T, head_size]
         
         Implements self-attention: Attention(Q, K, V) = softmax(Q * K^T / sqrt(d_k)) * V
+
+        The input is [B, T] where each training example is `tokens := idx[b]`
+        Then row(batch) b, col(time) t, holds the N_EMBD-length vector: tok_emb(tokens[t]) + pos_emb(t)
+        Without attention, we'd just be learning "what follows tokens[t] at time position t?"
+        With masked self-attention, "what follows tokens[t] at time t" means some mixture of information from [0,t)
+        - The mask is to ensure we only get information from [0,t) and not from the future
+        - Q*K^T describes the fraction of how much each of [0,t) contributes
+        - V describes how much each of the [0:t] reaches the final vector
+
+        Intuition:
+        Query: "What am I looking for"
+        Key: "What do I contain"
+        Value: "What will I transmit"
+
         """
         # [B, T, N_EMBD] -> [B, T, head_size]
         _B, T, C = idx.shape
@@ -161,13 +179,25 @@ class Head(torch.nn.Module):
         v: torch.Tensor = self.value(idx)
 
         # [B, T, head_size] * [B, head_size, T] = [B, T, T]
+        # d_k here is C, or N_EMBD.
         wei = q @ k.transpose(-2, -1) * (C ** -0.5)
-        # Masked-fill lower-triangular with -inf
+        # [T, T] masked-fill lower-triangular with -inf
+        # This avoids tokens from being influenced by future tokens when we compute the output
         wei = wei.masked_fill(self.tril[:T, :T] == 0, float("-inf"))
         # Softmax per-row, ie the final dimension.
         wei = F.softmax(wei, dim=-1)
+        # At this point, wei has 1-summing rows, with row t holding t+1 values:
+        # [1.0, 0.0, ...,          0.0]
+        # [0.3, 0.7, 0.0, ...      0.0]
+        # [0.2, 0.5, 0.3, 0.0, ... 0.0]
+        # ...
+        # wei row i, col j: "how much did Q,K overlap re: 'what token i is looking for' with 'what token j has'"
 
         # [B, T, T] * [B, T, head_size] = [B, T, head_size]
+        # Per batch:
+        # For time t, a head_size-dimensional representation that represents a mixture of all of [:t+1]'s v vectors.
+        # e.g. out[2] = 0.2*v[0] + 0.5*v[1] + 0.3*v[2]
+        # This is how we get all of the prefixes [0:i] for i=1..T+1 at once.
         out = wei @ v
         return out
 
@@ -222,10 +252,13 @@ class GPT(torch.nn.Module):
         super().__init__()
         # From Figure 1: The Transformer https://proceedings.neurips.cc/paper_files/paper/2017/file/3f5ee243547dee91fbd053c1c4a845aa-Paper.pdf:
         # Output Embedding + Positional Encoding
+        # An array of num_embeddings rows; embedding_dim cols; initialized to N(0,1) (https://docs.pytorch.org/docs/2.14/generated/torch.nn.Embedding.html)
         self.token_embedding = torch.nn.Embedding(num_embeddings=vocab_size, embedding_dim=N_EMBD)
         self.position_embedding = torch.nn.Embedding(num_embeddings=BLOCK_SIZE, embedding_dim=N_EMBD)
 
         # Transformer blocks
+        # Learn longer-range dependencies by passing the enriched vectors along in sequence.
+        # e.g. first block is token<>token dependencies; second block might be word<>word dependencies or something
         self.blocks = torch.nn.Sequential(
             Block(N_EMBD, n_heads=4),
             Block(N_EMBD, n_heads=4),
@@ -260,13 +293,13 @@ class GPT(torch.nn.Module):
         # [T] in: just [0..T-1] to index into position embedding.
         # [T, C] out: the N_EMBD-size embeddings for every position from 0 to T
         pos_emb = self.position_embedding(torch.arange(0, T).to(device))
-        # (broadcast these across the B batches)
+        # (broadcast position embeddings across the B batches)
         x = tok_emb + pos_emb # [B, T, C]
         # apply transformer blocks
         x = self.blocks(x) # [B, T, C]
 
         # language model head:
-        # [B, T, C] in, as a combination of both "what is the token" and "what is the position" at every element
+        # [B, T, C] in
         # [B, T, vocab size] out
         logits = self.lm_head(x)
 
@@ -299,6 +332,7 @@ class GPT(torch.nn.Module):
             # Build up predictions for each context from the last char on each.
             # `output` grows from [B, T] -> [B, T+max_tokens]
             # So we need to look at only the last BLOCK_SIZE.
+            # NOTE: This means we can generate infinitely, but tokens that fall out of the context window are no longer considered.
             output_last_block = output[:, -BLOCK_SIZE:]
             logits, _loss = self(output_last_block, targets=None)
 
@@ -318,10 +352,7 @@ class GPT(torch.nn.Module):
 
         return output
 
-def train(step_count: int, train_data: str, validation_data: str, vocab: list[str], device: str) -> GPT:
-    model = GPT(len(vocab)).to(device)
-    tokenized_train_data = torch.tensor(encode(train_data, vocab)).to(device)
-    tokenized_val_data = torch.tensor(encode(validation_data, vocab)).to(device)
+def train(step_count: int, model: GPT, tokenized_train_data: torch.Tensor, tokenized_val_data: torch.Tensor) -> GPT:
     # A reasonable lr for adam is 1e-3 to 1e-4.
     optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE)
     for step in range(step_count):
@@ -348,7 +379,10 @@ def main():
     device = get_device()
     print(f"available device: {device}")
 
-    model = train(TRAIN_STEPS, train_data, validation_data, vocab, device)
+    model = GPT(len(vocab)).to(device)
+    tokenized_train_data = torch.tensor(encode(train_data, vocab)).to(device)
+    tokenized_val_data = torch.tensor(encode(validation_data, vocab)).to(device)
+    model = train(TRAIN_STEPS, model, tokenized_train_data, tokenized_val_data)
 
     idx = torch.zeros((1, 1), dtype=torch.long).to(device)
     result_tokens = model.generate(idx, max_tokens=1000)
