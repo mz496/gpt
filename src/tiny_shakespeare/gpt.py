@@ -40,7 +40,7 @@ From here you can get validation loss down to 2.4-2.5 ish.
 """
 
 import torch
-from torch.nn import functional as F
+from torch.nn import LayerNorm, functional as F
 
 from .utils import decode, encode, get_data
 
@@ -237,13 +237,18 @@ class Block(torch.nn.Module):
         # Note that these embedding dimensions are independently looking at one another, after the self-attention has done the cross-communication.
         self.ffwd = FeedForward(N_EMBD)
 
+        # Add and Norm
+        # We put the layer norms before the self-attention and feed-forward layers, in contrast to the paper, but in keeping with the video.
+        self.ln1 = LayerNorm(N_EMBD)
+        self.ln2 = LayerNorm(N_EMBD)
+
     def forward(self, x: torch.Tensor):
         # Relative to 1:26:00:
         # Only adding these skip-connections with +, we can drop validation loss from the plateauing 2.38 to 2.16.
         # With the residual stream projections, we can drop validation loss further to 2.04 (and 1.91 training loss which starts to signal overfitting).
         # [B, T, C] in and out
-        x = x + self.sa_heads(x)
-        x = x + self.ffwd(x)
+        x = x + self.sa_heads(self.ln1(x))
+        x = x + self.ffwd(self.ln2(x))
         return x
 
 class GPT(torch.nn.Module):
