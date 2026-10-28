@@ -49,17 +49,18 @@ from .utils import decode, encode, get_data
 # Training
 TRAIN_STEPS = 5000
 # how many independent sequences will we look at in parallel?
-BATCH_SIZE = 32
+BATCH_SIZE = 64
 # what is the max context length for predictions?
-BLOCK_SIZE = 8
-LEARNING_RATE = 1e-3
+BLOCK_SIZE = 256
+LEARNING_RATE = 3e-4
 # for loss estimation
 EVAL_ITERS = 200
 
 # Model
 # number of embedding dimensions. In the paper, this is d_model.
-N_EMBD = 32
-N_LAYER = 3
+N_EMBD = 384
+N_HEAD = 6
+N_LAYER = 6
 DROPOUT = 0.2
 # ---
 
@@ -287,7 +288,7 @@ class GPT(torch.nn.Module):
         # Transformer blocks
         # Learn longer-range dependencies by passing the enriched vectors along in sequence.
         # e.g. first block is token<>token dependencies; second block might be word<>word dependencies or something
-        self.blocks = torch.nn.Sequential(*[Block(N_EMBD, n_heads=4) for _ in range(N_LAYER)])
+        self.blocks = torch.nn.Sequential(*[Block(N_EMBD, n_heads=N_HEAD) for _ in range(N_LAYER)])
         self.ln_final = torch.nn.LayerNorm(N_EMBD)
 
         # Final linear layer
