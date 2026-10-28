@@ -45,34 +45,26 @@ From here you can get validation loss down to 2.4-2.5 ish.
 - Scaling up
 """
 
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import torch
-import wandb
 from torch.nn import LayerNorm, functional as F
 
-from .utils import decode, encode, get_data, timestamp
-
-# --- hyperparameters ---
-
-# Training
-TRAIN_STEPS = 1500
-SEED = 1337
-# how many independent sequences will we look at in parallel?
-BATCH_SIZE = 64
-# what is the max context length for predictions?
-BLOCK_SIZE = 256
-LEARNING_RATE = 3e-4
-# for loss estimation
-EVAL_ITERS = 200
-
-# Model
-# number of embedding dimensions. In the paper, this is d_model.
-N_EMBD = 384
-N_HEAD = 6
-N_LAYER = 6
-DROPOUT = 0.2
-# ---
+@dataclass(frozen=True)
+class GPTConfig:
+    """
+    Everything that defines the model's architecture (and so the shapes of its weights).
+    Saved inside the checkpoint so that a run can be reloaded without knowing the training constants.
+    """
+    vocab_size: int
+    # number of embedding dimensions. In the paper, this is d_model.
+    n_embd: int
+    n_head: int
+    n_layer: int
+    # what is the max context length for predictions?
+    block_size: int
+    dropout: float
 
 def get_device():
     return (
@@ -80,46 +72,6 @@ def get_device():
         else "mps" if torch.backends.mps.is_available()
         else "cpu"
     )
-
-def get_batch(tokenized: torch.Tensor, batch_size: int, block_size: int) -> tuple[torch.Tensor, torch.Tensor]:
-    """
-    Pull `batch_size` windows of length `block_size` starting at random points in `tokenized`.
-
-    Returns two tensors (contexts, targets) of size [B, T]
-    - B = batch_size
-    - T = block_size
-    where targets[i][j] is the token that follows the prefix context[i][:j+1].
-
-    NOTE:
-    In the bigram model, we ignore everything except the final char for predictions.
-      i.e. our examples are of the form (context[i][j], targets[i][j])
-    During self-attention, the way we build our training examples is exactly the same,
-      but the way we read off `context` changes to make the input a mixture of all of context[i][:j+1] instead.
-    """
-    # [B] random numbers drawn from [0, n-block_size)
-    # Do we need to prevent wraparound here...?
-    starts = torch.randint(0, len(tokenized) - block_size, (batch_size,))
-    x = torch.stack([tokenized[i:i+block_size] for i in starts])
-    y = torch.stack([tokenized[i+1:i+block_size+1] for i in starts])
-    return x, y
-
-@torch.no_grad
-def estimate_loss(model: torch.nn.Module, tokenized_train_data: torch.Tensor, tokenized_val_data: torch.Tensor) -> dict[str, float]:
-    """
-    Estimate loss over train, validation based on EVAL_ITERS batches.
-    """
-    model.eval()
-    result: dict[str, float] = {}
-    for dataset_type, data in [("train", tokenized_train_data), ("validation", tokenized_val_data)]:
-        # Compute the mean per dataset type.
-        losses = torch.zeros(EVAL_ITERS)
-        for k in range(EVAL_ITERS):
-            contexts, targets = get_batch(data, BATCH_SIZE, BLOCK_SIZE)
-            _logits, loss = model(contexts, targets)
-            losses[k] = loss
-        result[dataset_type] = losses.mean().item()
-    model.train()
-    return result
 
 class FeedForward(torch.nn.Module):
     """
@@ -130,14 +82,15 @@ class FeedForward(torch.nn.Module):
 
     Karpathy justifies the second linearity as the projection for the residual stream.
     """
-    def __init__(self, n_embd: int):
+    def __init__(self, config: GPTConfig):
         super().__init__()
+        n_embd = config.n_embd
         self.net = torch.nn.Sequential(
             torch.nn.Linear(n_embd, 4 * n_embd),
             torch.nn.ReLU(),
             torch.nn.Linear(4 * n_embd, n_embd),
             # Dropout right before outputting, so we preserve the residual pathway happening downstream
-            torch.nn.Dropout(DROPOUT),
+            torch.nn.Dropout(config.dropout),
         )
     
     def forward(self, x: torch.Tensor):
@@ -154,19 +107,19 @@ class Head(torch.nn.Module):
     # Placed by register_buffer in init, written here to satisfy typechecking on this field.
     tril: torch.Tensor
 
-    def __init__(self, head_size: int):
+    def __init__(self, config: GPTConfig, head_size: int):
         super().__init__()
         self.head_size = head_size
         # Each of the [B, T] will emit one of these.
         # In the paper, the 1th dim (head_size) is d_k. Query and key must be the same d_k because they get multiplied together as the 'dot product' attention.
-        self.query = torch.nn.Linear(N_EMBD, head_size, bias=False)
-        self.key = torch.nn.Linear(N_EMBD, head_size, bias=False)
+        self.query = torch.nn.Linear(config.n_embd, head_size, bias=False)
+        self.key = torch.nn.Linear(config.n_embd, head_size, bias=False)
         # In the paper, the 1th dim (head_size) is d_v.
-        self.value = torch.nn.Linear(N_EMBD, head_size, bias=False)
-        # BLOCK_SIZE is the max value along the T dimension; which we then slice according to what the actual input is.
-        self.register_buffer("tril", torch.tril(torch.ones(BLOCK_SIZE, BLOCK_SIZE)))
+        self.value = torch.nn.Linear(config.n_embd, head_size, bias=False)
+        # block_size is the max value along the T dimension; which we then slice according to what the actual input is.
+        self.register_buffer("tril", torch.tril(torch.ones(config.block_size, config.block_size)))
 
-        self.dropout = torch.nn.Dropout(DROPOUT)
+        self.dropout = torch.nn.Dropout(config.dropout)
 
     def forward(self, idx: torch.Tensor):
         """
@@ -235,11 +188,11 @@ class MultiHeadAttention(torch.nn.Module):
     where head_i = Attention(Q * W_i^Q, K * W_i^K, V * W_i^V)
     """
 
-    def __init__(self, num_heads: int, head_size: int):
+    def __init__(self, config: GPTConfig, num_heads: int, head_size: int):
         super().__init__()
-        self.heads = torch.nn.ModuleList([Head(head_size) for _ in range(num_heads)])
-        self.proj = torch.nn.Linear(num_heads * head_size, N_EMBD)
-        self.dropout = torch.nn.Dropout(DROPOUT)
+        self.heads = torch.nn.ModuleList([Head(config, head_size) for _ in range(num_heads)])
+        self.proj = torch.nn.Linear(num_heads * head_size, config.n_embd)
+        self.dropout = torch.nn.Dropout(config.dropout)
 
     def forward(self, x: torch.Tensor):
         # [B, T, C] in
@@ -260,21 +213,21 @@ class Block(torch.nn.Module):
     """
     Transformer block.
     """
-    def __init__(self, n_embd: int, n_heads: int):
+    def __init__(self, config: GPTConfig):
         super().__init__()
         # Masked Multi-Head Attention
         # The intuition is that we are letting attention run in this dimensional space
         # With multi-head self-attention we subdivide into several smaller-dimensional spaces.
-        self.sa_heads = MultiHeadAttention(num_heads=n_heads, head_size=n_embd // n_heads)
+        self.sa_heads = MultiHeadAttention(config, num_heads=config.n_head, head_size=config.n_embd // config.n_head)
 
         # Feed Forward
         # Note that these embedding dimensions are independently looking at one another, after the self-attention has done the cross-communication.
-        self.ffwd = FeedForward(N_EMBD)
+        self.ffwd = FeedForward(config)
 
         # Add and Norm
         # We put the layer norms before the self-attention and feed-forward layers, in contrast to the paper, but in keeping with the video.
-        self.ln1 = LayerNorm(N_EMBD)
-        self.ln2 = LayerNorm(N_EMBD)
+        self.ln1 = LayerNorm(config.n_embd)
+        self.ln2 = LayerNorm(config.n_embd)
 
     def forward(self, x: torch.Tensor):
         # Relative to 1:26:00:
@@ -287,23 +240,24 @@ class Block(torch.nn.Module):
 
 class GPT(torch.nn.Module):
 
-    def __init__(self, vocab_size: int):
+    def __init__(self, config: GPTConfig):
         super().__init__()
+        self.config = config
         # From Figure 1: The Transformer https://proceedings.neurips.cc/paper_files/paper/2017/file/3f5ee243547dee91fbd053c1c4a845aa-Paper.pdf:
         # Output Embedding + Positional Encoding
         # An array of num_embeddings rows; embedding_dim cols; initialized to N(0,1) (https://docs.pytorch.org/docs/2.14/generated/torch.nn.Embedding.html)
-        self.token_embedding = torch.nn.Embedding(num_embeddings=vocab_size, embedding_dim=N_EMBD)
-        self.position_embedding = torch.nn.Embedding(num_embeddings=BLOCK_SIZE, embedding_dim=N_EMBD)
+        self.token_embedding = torch.nn.Embedding(num_embeddings=config.vocab_size, embedding_dim=config.n_embd)
+        self.position_embedding = torch.nn.Embedding(num_embeddings=config.block_size, embedding_dim=config.n_embd)
 
         # Transformer blocks
         # Learn longer-range dependencies by passing the enriched vectors along in sequence.
         # e.g. first block is token<>token dependencies; second block might be word<>word dependencies or something
-        self.blocks = torch.nn.Sequential(*[Block(N_EMBD, n_heads=N_HEAD) for _ in range(N_LAYER)])
-        self.ln_final = torch.nn.LayerNorm(N_EMBD)
+        self.blocks = torch.nn.Sequential(*[Block(config) for _ in range(config.n_layer)])
+        self.ln_final = torch.nn.LayerNorm(config.n_embd)
 
         # Final linear layer
         # "Encodes token and position into N_EMBD dimensions and back out"
-        self.lm_head = torch.nn.Linear(N_EMBD, vocab_size)
+        self.lm_head = torch.nn.Linear(config.n_embd, config.vocab_size)
 
     def forward(self, idx: torch.Tensor, targets: torch.Tensor | None) -> tuple[torch.Tensor, torch.Tensor | None]:
         """
@@ -368,9 +322,9 @@ class GPT(torch.nn.Module):
         for _ in range(max_tokens):
             # Build up predictions for each context from the last char on each.
             # `output` grows from [B, T] -> [B, T+max_tokens]
-            # So we need to look at only the last BLOCK_SIZE.
+            # So we need to look at only the last block_size.
             # NOTE: This means we can generate infinitely, but tokens that fall out of the context window are no longer considered.
-            output_last_block = output[:, -BLOCK_SIZE:]
+            output_last_block = output[:, -self.config.block_size:]
             logits, _loss = self(output_last_block, targets=None)
 
             # Extract the T-th col into a [B, vocab_size] - for each batch, the distribution that the embedding gives over the vocab.
@@ -389,74 +343,28 @@ class GPT(torch.nn.Module):
 
         return output
 
-def train(step_count: int, model: GPT, tokenized_train_data: torch.Tensor, tokenized_val_data: torch.Tensor, run: wandb.Run) -> GPT:
-    # A reasonable lr for adam is 1e-3 to 1e-4.
-    optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE)
-    for step in range(step_count):
-        # Zero out gradients for this iteration.
-        model.zero_grad()
+def checkpoint_path(run_id: str) -> Path:
+    return Path("checkpoints") / run_id / "model.pt"
 
-        contexts, targets = get_batch(tokenized_train_data, batch_size=BATCH_SIZE, block_size=BLOCK_SIZE)
-        _logits, loss = model(contexts, targets)
-        # expect logits shape [B, T, C]
-        # An untrained model is near-uniform over C tokens, so loss should start near ~ln(C)
-        if step % 100 == 0 or step == step_count-1:
-            losses = estimate_loss(model, tokenized_train_data, tokenized_val_data)
-            print(f"step={step:04d} loss={losses}")
-            run.log({"train/loss": losses["train"], "validation/loss": losses["validation"]}, step=step)
-
-        # Write in gradients based on how bad this iteration was.
-        loss.backward()
-
-        # Update weights with those gradients.
-        optimizer.step() # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
-    return model
-
-def save_checkpoint(model: torch.nn.Module, run_id: str) -> Path:
+def save_checkpoint(model: GPT, run_id: str) -> Path:
     """
-    torch.save s the model's state_dict to checkpoints/<run_id>/model.pt and returns that path.
+    torch.save s the model's config and state_dict to checkpoints/<run_id>/model.pt and returns that path.
     """
-    path = Path("checkpoints") / run_id / "model.pt"
+    path = checkpoint_path(run_id)
     path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(model.state_dict(), path)
+    torch.save({"config": asdict(model.config), "state_dict": model.state_dict()}, path)
     return path
 
-def main():
-    torch.manual_seed(SEED)  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
-    train_data, validation_data, vocab = get_data()
-    device = get_device()
-    print(f"available device: {device}")
-
-    model = GPT(len(vocab)).to(device)
-    tokenized_train_data = torch.tensor(encode(train_data, vocab)).to(device)
-    tokenized_val_data = torch.tensor(encode(validation_data, vocab)).to(device)
-
-    name = timestamp()
-    run = wandb.init(project="tiny-shakespeare", name=name, config={
-        "seed": SEED,
-        "train_steps": TRAIN_STEPS,
-        "batch_size": BATCH_SIZE,
-        "block_size": BLOCK_SIZE,
-        "learning_rate": LEARNING_RATE,
-        "eval_iters": EVAL_ITERS,
-        "n_embd": N_EMBD,
-        "n_head": N_HEAD,
-        "n_layer": N_LAYER,
-        "dropout": DROPOUT,
-    })
-    # A unique and sortable run ID to identify this run.
-    run_id = f"{name}_{run.id}"
-
-    model = train(TRAIN_STEPS, model, tokenized_train_data, tokenized_val_data, run)
-
-    checkpoint_path = save_checkpoint(model, run_id)
-    print(f"saved checkpoint to {checkpoint_path}")
-    run.finish()
-
-    idx = torch.zeros((1, 1), dtype=torch.long).to(device)
-    result_tokens = model.generate(idx, max_tokens=1000)
-    result = decode(result_tokens[0].tolist(), vocab)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType] Bad torch type stubs.
-    print(result)
-
-if __name__ == "__main__":
-    main()
+def load_checkpoint(run_id: str, device: str) -> GPT:
+    """
+    Reads the checkpoint written by save_checkpoint into a fresh model on `device`, in eval mode.
+    The architecture comes from the config saved in the checkpoint.
+    """
+    path = checkpoint_path(run_id)
+    if not path.is_file():
+        raise FileNotFoundError(f"checkpoint not found: {path}")
+    saved = torch.load(path, map_location=device, weights_only=True)
+    model = GPT(GPTConfig(**saved["config"])).to(device)
+    model.load_state_dict(saved["state_dict"])
+    model.eval()
+    return model

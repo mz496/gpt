@@ -4,5 +4,8 @@ test *args:
 bigram *args:
     uv run --locked -m src.tiny_shakespeare.bigram {{args}}
 
-gpt *args:
-    uv run --locked -m src.tiny_shakespeare.gpt {{args}}
+gpt-train *args:
+    uv run --locked -m src.tiny_shakespeare.gpt.train {{args}}
+
+gpt-generate run_id *args:
+    uv run --locked -m src.tiny_shakespeare.gpt.generate {{run_id}} {{args}}
