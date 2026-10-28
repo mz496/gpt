@@ -30,9 +30,9 @@ class BytePairEncoding:
     Does passes over the input, merging the most commonly seen byte pairs.
     """
 
-    def __init__(self, plain: str):
+    def __init__(self, plain: str, target_vocab_size: int):
         """
-        Initialized with the plaintext.
+        Initialized with the plaintext and the target vocab size.
         """
 
         # Init the merges: empty to start
@@ -40,14 +40,20 @@ class BytePairEncoding:
         # In decode, we convert this to a mapping.
         self.merges: list[Merge] = []
 
-        # Init the vocab: all distinct tokens
+        # Init the vocab: all distinct tokens. Due to our UTF-8 encoding, the count of distinct tokens is 2**8 = 256.
+        # So if we use values to represent merged tokens, they should start at that range and up, so they won't ever conflict with known chars, and we can use them as embedding table indices later.
         tokens = plain.encode("utf-8")
+        num_distinct_tokens = 256
+        
         tokens = list(map(int, tokens))
         self.tokens: list[int] = tokens
 
-        # Because we're using UTF-8, our tokens will all be in the range [0, 255].
-        # So if we use values to represent merged tokens, they should be outside that range, and all positive, so we can use them as embedding table indices later.
-        self.merged_token_counter: int = 256
+        self.merged_token_counter: int = num_distinct_tokens
+
+        # The vocab size increases by 1 every time we merge, so this puts an upper bound on the number of passes done.
+        if target_vocab_size <= num_distinct_tokens:
+            raise Exception(f"cannot set a target vocab size <= the number of distinct tokens in UTF-8 ({num_distinct_tokens})")
+        self.num_merge_passes = target_vocab_size - num_distinct_tokens
 
     def get_next_merged_token_counter(self):
         """
@@ -77,9 +83,7 @@ class BytePairEncoding:
         - vocab_size: the size of the vocab
         """
         
-        # Do N merge passes
-        merge_passes = 4
-        for i in range(merge_passes):
+        for i in range(self.num_merge_passes):
             print(f"before pass {i}:")
             print(self.tokens)
 
@@ -170,4 +174,4 @@ class BytePairEncoding:
         pass
 
     def __str__(self) -> str:
-        return f"BytePairEncoding<>"
+        return f"BytePairEncoding<merges={self.merges}>"
