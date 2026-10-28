@@ -1,5 +1,6 @@
 # From https://www.reedbeta.com/blog/programmers-intro-to-unicode/
 # From Karpathy's "Let's build the GPT Tokenizer", ~27:46
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -8,7 +9,7 @@ from pathlib import Path
 
 @dataclass
 class Merge:
-    from_tokens: list[int]
+    from_tokens: tuple[int, int]
     to_token: int
 
     def __str__(self):
@@ -70,17 +71,18 @@ class BytePairEncoding:
         """
         
         # Do N merge passes
-        merge_passes = 5
+        merge_passes = 3
         for i in range(merge_passes):
             print(f"before pass {i}:")
             print(self.tokens)
-            merge, self.tokens = self.merge(self.tokens)
-            # Add to merges
+
+            merge, tokens_post_merge = self.merge(self.tokens)
+            self.merges.append(merge)
+            self.tokens = tokens_post_merge
+
             print(f"after pass {i}:")
             print(f"merge: {merge}")
             print(self.tokens)
-            self.merges.append(merge)
-            break
 
         # Return the final tokens and vocab size
         vocab_size = len(set(self.tokens))
@@ -88,7 +90,7 @@ class BytePairEncoding:
 
     def merge(self, tokens: list[int]) -> tuple[Merge, list[int]]:
         """
-        One merge pass.
+        One merge pass. Pure.
         aaab -> Zab (but using a token that's outside the vocab)
 
         Inputs:
@@ -98,17 +100,41 @@ class BytePairEncoding:
         - merge: the Merge that was done
         - tokens: the tokens post-merge
         """
+        if len(tokens) <= 2:
+            raise Exception("tokens must be length > 2")
         # Look for the most common byte-pair across the tokens
+        # Note we're slightly off here in case of long runs like aaa - this counts 2 occurrences of aa, but we only can compress it once.
+        # Align every token with its next token, dropping the last.
+        counter = Counter(zip(tokens, tokens[1:]))
+        # The tuple[int, int] pair.
+        from_tokens = (counter.most_common(1))[0][0]
+        from_tokens_freq = (counter.most_common(1))[0][1]
+        if from_tokens_freq == 1:
+            raise Exception("no more merges possible")
+        to_token = self.get_next_merged_token_counter()
 
-        # Get the next merged token counter and assign it: <byte pair> -> merged token counter
+        # Do the substitution, going forward
+        tokens = self.replace_pair(tokens, from_tokens, to_token)
 
-        # Do the substitution
-
-        # Return the post-merge tokens
-        # Placeholder
-        merge = Merge([1,2], -1)
+        merge = Merge(from_tokens, to_token)
         return merge, tokens
         
+    def replace_pair(self, tokens: list[int], from_tokens: tuple[int, int], to_token: int) -> list[int]:
+        """
+        Replaces from_tokens with to_token, going forward only, thus replacing the first occurrence(s) of from_tokens with to_token.
+        e.g. 1,1,1,1,1 where to_token is X becomes X,X,1.
+        """
+        out: list[int] = []
+        i = 0
+        while i < len(tokens):
+            if i + 1 < len(tokens) and (tokens[i], tokens[i + 1]) == from_tokens:
+                out.append(to_token)
+                i += 2
+            else:
+                out.append(tokens[i])
+                i += 1
+        return out
+    
 
     def decode(self, tokens: list[int], vocab: dict[str, str]):
         """
