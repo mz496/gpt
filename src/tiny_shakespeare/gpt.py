@@ -60,6 +60,7 @@ EVAL_ITERS = 200
 # number of embedding dimensions. In the paper, this is d_model.
 N_EMBD = 32
 N_LAYER = 3
+DROPOUT = 0.2
 # ---
 
 def get_device():
@@ -123,7 +124,9 @@ class FeedForward(torch.nn.Module):
         self.net = torch.nn.Sequential(
             torch.nn.Linear(n_embd, 4 * n_embd),
             torch.nn.ReLU(),
-            torch.nn.Linear(4 * n_embd, n_embd)
+            torch.nn.Linear(4 * n_embd, n_embd),
+            # Dropout right before outputting, so we preserve the residual pathway happening downstream
+            torch.nn.Dropout(DROPOUT),
         )
     
     def forward(self, x: torch.Tensor):
@@ -134,7 +137,7 @@ class Head(torch.nn.Module):
     """
     One head of self-attention.
 
-    Intuition: In a head_size-dimensional space, let the model learn
+    Intuition: In a head_size-dimensional space, let the model learn relationships between tokens in the training examples.
     """
 
     # Placed by register_buffer in init, written here to satisfy typechecking on this field.
@@ -144,13 +147,15 @@ class Head(torch.nn.Module):
         super().__init__()
         self.head_size = head_size
         # Each of the [B, T] will emit one of these.
-        # In the paper, the 1th dim is d_k. Query and key must be the same d_k because they get multiplied together as the 'dot product' attention.
+        # In the paper, the 1th dim (head_size) is d_k. Query and key must be the same d_k because they get multiplied together as the 'dot product' attention.
         self.query = torch.nn.Linear(N_EMBD, head_size, bias=False)
         self.key = torch.nn.Linear(N_EMBD, head_size, bias=False)
-        # In the paper, the 1th dim is d_v.
+        # In the paper, the 1th dim (head_size) is d_v.
         self.value = torch.nn.Linear(N_EMBD, head_size, bias=False)
         # BLOCK_SIZE is the max value along the T dimension; which we then slice according to what the actual input is.
         self.register_buffer("tril", torch.tril(torch.ones(BLOCK_SIZE, BLOCK_SIZE)))
+
+        self.dropout = torch.nn.Dropout(DROPOUT)
 
     def forward(self, idx: torch.Tensor):
         """
@@ -194,6 +199,9 @@ class Head(torch.nn.Module):
         # ...
         # wei row i, col j: "how much did Q,K overlap re: 'what token i is looking for' with 'what token j has'"
 
+        # Randomly dropout some weights, i.e. stop some positions from communicating with one another.
+        wei = self.dropout(wei)
+
         # [B, T, T] * [B, T, head_size] = [B, T, head_size]
         # Per batch:
         # For time t, a head_size-dimensional representation that represents a mixture of all of [:t+1]'s v vectors.
@@ -205,33 +213,47 @@ class Head(torch.nn.Module):
 class MultiHeadAttention(torch.nn.Module):
     """
     Multiple heads of self-attention running in parallel, concatenated together along the channel dimension.
+
+    Translations to the paper:
+    - num_heads is the paper's `h`.
+    - head_size is the paper's `d_k`.
+
+    In the paper:
+
+    MultiHead(Q, K, V) = Concat(head_1, ... head_h) * W^O
+    where head_i = Attention(Q * W_i^Q, K * W_i^K, V * W_i^V)
     """
 
     def __init__(self, num_heads: int, head_size: int):
         super().__init__()
         self.heads = torch.nn.ModuleList([Head(head_size) for _ in range(num_heads)])
-        # Projection for the residual stream.
-        self.proj = torch.nn.Linear(N_EMBD, N_EMBD)
+        self.proj = torch.nn.Linear(num_heads * head_size, N_EMBD)
+        self.dropout = torch.nn.Dropout(DROPOUT)
 
     def forward(self, x: torch.Tensor):
         # [B, T, C] in
         # Head(head_size): [B, T, C] -> [B, T, head_size].
         # num_heads of these concatted: [B, T, head_size * num_heads]
-        # - note that N_EMBD is subdivided evenly, so head_size * num_heads == N_EMBD
         out = torch.cat([h(x) for h in self.heads], dim=-1)
+        # [B, T, head_size * num_heads] in
+        # [B, T, C] out
+        # Since num_heads * head_size happens to equal N_EMBD the way we've done it, we could just plainly concat,
+        # but instead we let the heads' outputs interact via this projection.
+        # W^O in the paper
         out = self.proj(out)
+        # Dropout right before outputting here, so the later residual pathway is not affected.
+        out = self.dropout(out)
         return out
 
 class Block(torch.nn.Module):
     """
     Transformer block.
-    n_embd should be evenly divisible by n_heads.
     """
     def __init__(self, n_embd: int, n_heads: int):
         super().__init__()
         # Masked Multi-Head Attention
         # The intuition is that we are letting attention run in this dimensional space
-        # With multi-head self-attention we subdivide into several smaller-dimensional spaces and concat them together
+        # With multi-head self-attention we subdivide into several smaller-dimensional spaces.
         self.sa_heads = MultiHeadAttention(num_heads=n_heads, head_size=n_embd // n_heads)
 
         # Feed Forward

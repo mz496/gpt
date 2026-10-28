@@ -18,3 +18,24 @@ Project 3: Supervised finetuning (10 hrs)
 - [ ] Compare base and finetuned outputs on 20 prompts.
 - [ ] Port to Thinking Machines' Tinker API.
 Done when: you have a W&B run, a Hub model, and a short note on where finetuning helped and where it didn't.
+
+
+# Lab notebook
+
+Toward the end of the video, Karpathy starts speedrunning some things that are not super obvious in the paper (more so general neural net training tricks) so I decided to log each of the changes:
+
+With 5000 steps,
+
+Adding residual pathways:
+- train loss 1.91, val loss 2.04
+
+Adding two layer norms around the self-attention and feed forward blocks:
+- train loss 1.91, val loss 2.03
+
+Adding a last layer norm around transformer blocks:
+- train loss 1.89, validation loss 2.01
+
+Adding dropout with p=0.2:
+- train loss 2.016, validation loss 2.136
+- I think I need to start scaling up now
+
