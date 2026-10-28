@@ -45,15 +45,19 @@ From here you can get validation loss down to 2.4-2.5 ish.
 - Scaling up
 """
 
+from pathlib import Path
+
 import torch
+import wandb
 from torch.nn import LayerNorm, functional as F
 
-from .utils import decode, encode, get_data
+from .utils import decode, encode, get_data, timestamp
 
 # --- hyperparameters ---
 
 # Training
 TRAIN_STEPS = 1500
+SEED = 1337
 # how many independent sequences will we look at in parallel?
 BATCH_SIZE = 64
 # what is the max context length for predictions?
@@ -385,7 +389,7 @@ class GPT(torch.nn.Module):
 
         return output
 
-def train(step_count: int, model: GPT, tokenized_train_data: torch.Tensor, tokenized_val_data: torch.Tensor) -> GPT:
+def train(step_count: int, model: GPT, tokenized_train_data: torch.Tensor, tokenized_val_data: torch.Tensor, run: wandb.Run) -> GPT:
     # A reasonable lr for adam is 1e-3 to 1e-4.
     optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE)
     for step in range(step_count):
@@ -397,7 +401,9 @@ def train(step_count: int, model: GPT, tokenized_train_data: torch.Tensor, token
         # expect logits shape [B, T, C]
         # An untrained model is near-uniform over C tokens, so loss should start near ~ln(C)
         if step % 100 == 0 or step == step_count-1:
-            print(f"step={step:04d} loss={estimate_loss(model, tokenized_train_data, tokenized_val_data)}")
+            losses = estimate_loss(model, tokenized_train_data, tokenized_val_data)
+            print(f"step={step:04d} loss={losses}")
+            run.log({"train/loss": losses["train"], "validation/loss": losses["validation"]}, step=step)
 
         # Write in gradients based on how bad this iteration was.
         loss.backward()
@@ -406,8 +412,17 @@ def train(step_count: int, model: GPT, tokenized_train_data: torch.Tensor, token
         optimizer.step() # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
     return model
 
+def save_checkpoint(model: torch.nn.Module, run_id: str) -> Path:
+    """
+    torch.save s the model's state_dict to checkpoints/<run_id>/model.pt and returns that path.
+    """
+    path = Path("checkpoints") / run_id / "model.pt"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(model.state_dict(), path)
+    return path
+
 def main():
-    torch.manual_seed(1337)  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
+    torch.manual_seed(SEED)  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
     train_data, validation_data, vocab = get_data()
     device = get_device()
     print(f"available device: {device}")
@@ -415,7 +430,28 @@ def main():
     model = GPT(len(vocab)).to(device)
     tokenized_train_data = torch.tensor(encode(train_data, vocab)).to(device)
     tokenized_val_data = torch.tensor(encode(validation_data, vocab)).to(device)
-    model = train(TRAIN_STEPS, model, tokenized_train_data, tokenized_val_data)
+
+    name = timestamp()
+    run = wandb.init(project="tiny-shakespeare", name=name, config={
+        "seed": SEED,
+        "train_steps": TRAIN_STEPS,
+        "batch_size": BATCH_SIZE,
+        "block_size": BLOCK_SIZE,
+        "learning_rate": LEARNING_RATE,
+        "eval_iters": EVAL_ITERS,
+        "n_embd": N_EMBD,
+        "n_head": N_HEAD,
+        "n_layer": N_LAYER,
+        "dropout": DROPOUT,
+    })
+    # A unique and sortable run ID to identify this run.
+    run_id = f"{name}_{run.id}"
+
+    model = train(TRAIN_STEPS, model, tokenized_train_data, tokenized_val_data, run)
+
+    checkpoint_path = save_checkpoint(model, run_id)
+    print(f"saved checkpoint to {checkpoint_path}")
+    run.finish()
 
     idx = torch.zeros((1, 1), dtype=torch.long).to(device)
     result_tokens = model.generate(idx, max_tokens=1000)

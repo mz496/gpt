@@ -19,9 +19,7 @@ generate with a (1, 1) zero tensor to get, say, 100 new chars in the time dimens
 now you have a (1, 100) tensor, decode it.
 """
 
-from dataclasses import dataclass
-from urllib.request import urlopen
-from numpy.random import Generator
+from datetime import datetime
 from pathlib import Path
 
 def get_data() -> tuple[str, str, list[str]]:
@@ -54,16 +52,5 @@ def decode(tokens: list[int], vocab: list[str]) -> str:
     id_to_token = {i: tok for i, tok in enumerate(vocab)}
     return "".join([id_to_token[id] for id in tokens])
 
-@dataclass
-class Example:
-    context: list[int]
-    target: int
-
-def get_batch(tokenized: list[int], rng: Generator, batch_size: int, context_size: int) -> list[Example]:
-    """
-    Pull `batch_size` windows of length `context_size` starting at random points in `tokenized`.
-    NOTE: This is only used after bigram.
-    """
-    # Get `batch_size` random ints from [0,n-context_size)
-    starts: list[int] = rng.integers(0, len(tokenized) - context_size, size=batch_size).tolist()
-    return [Example(context=tokenized[i:i+context_size], target=tokenized[i+context_size]) for i in starts]
+def timestamp() -> str:
+    return datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
