@@ -37,6 +37,12 @@ From here you can get validation loss down to 2.4-2.5 ish.
 
 1:33:00
 - LayerNorm
+
+1:38:00
+- Dropout
+
+1:40:00
+- Scaling up
 """
 
 import torch
@@ -47,7 +53,7 @@ from .utils import decode, encode, get_data
 # --- hyperparameters ---
 
 # Training
-TRAIN_STEPS = 5000
+TRAIN_STEPS = 1500
 # how many independent sequences will we look at in parallel?
 BATCH_SIZE = 64
 # what is the max context length for predictions?
