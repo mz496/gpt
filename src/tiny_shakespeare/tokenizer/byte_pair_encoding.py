@@ -88,15 +88,18 @@ class BytePairEncoding:
         - tokens: the int array of tokens
         - vocab_size: the size of the vocab
         """
+
+        # Copy tokens so that self.tokens is never modified.
+        tokens = self.tokens[::]
         
         for i in range(self.num_merge_passes):
             # print(f"before pass {i}:")
             # print(self.tokens)
 
             try:
-                merge, tokens_post_merge = self.merge(self.tokens)
+                merge, tokens_post_merge = self.merge(tokens)
                 self.merges.append(merge)
-                self.tokens = tokens_post_merge
+                tokens = tokens_post_merge
             except IllegalMergeError as e:
                 print(f"merges halted: {e}")
                 break
@@ -106,7 +109,7 @@ class BytePairEncoding:
             # print(self.tokens)
 
         # Return the final tokens and vocab size
-        return self.tokens, self.get_vocab_size()
+        return tokens, self.get_vocab_size()
 
     def merge(self, tokens: list[int]) -> tuple[Merge, list[int]]:
         """
@@ -134,12 +137,12 @@ class BytePairEncoding:
         to_token = self.get_next_merged_token_counter()
 
         # Do the substitution, going forward
-        tokens = self.replace_pair(tokens, from_tokens, to_token)
+        tokens = self.replace_for_encode(tokens, from_tokens, to_token)
 
         merge = Merge(from_tokens, to_token)
         return merge, tokens
         
-    def replace_pair(self, tokens: list[int], from_tokens: tuple[int, int], to_token: int) -> list[int]:
+    def replace_for_encode(self, tokens: list[int], from_tokens: tuple[int, int], to_token: int) -> list[int]:
         """
         Replaces from_tokens with to_token, going forward only, thus replacing the first occurrence(s) of from_tokens with to_token.
         e.g. 1,1,1,1,1 where to_token is X becomes X,X,1.
@@ -157,7 +160,7 @@ class BytePairEncoding:
         return out
     
 
-    def decode(self, tokens: list[int], vocab: dict[str, str]):
+    def decode(self, tokens: list[int]):
         """
         Decodes the tokens using the state written during encode.
 
@@ -167,12 +170,18 @@ class BytePairEncoding:
         Outputs:
         - plain: the string
         """
-        # Convert merges to a map of to_token -> from_tokens, and keep doing replacements until the map is empty
-        merges_map: dict[int, tuple[int, int]] = {}
-        for merge in self.merges:
-            merges_map[merge.to_token] = merge.from_tokens
-        # TODO finish.
-        pass
+        for merge in reversed(self.merges):
+            tokens = self.replace_for_decode(tokens, merge.to_token, merge.from_tokens)
+        return tokens
+
+    def replace_for_decode(self, tokens: list[int], to_token: int, from_tokens: tuple[int, int]) -> list[int]:
+        out: list[int] = []
+        for t in tokens:
+            if t == to_token:
+                out.extend(from_tokens)
+            else:
+                out.append(t)
+        return out
 
 
     def save(self, path: Path):
