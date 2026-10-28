@@ -1,6 +1,6 @@
 
 
-from src.tiny_shakespeare.tokenizer.byte_pair_encoding import BytePairEncoding
+from src.tiny_shakespeare.tokenizers.byte_pair_encoding import BytePairEncoding
 
 
 def test_encode_decode_roundtrip() -> None:
