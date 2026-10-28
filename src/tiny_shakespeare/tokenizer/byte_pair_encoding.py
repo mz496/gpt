@@ -18,7 +18,7 @@ class Merge:
     from_tokens: tuple[int, int]
     to_token: int
 
-    def __str__(self):
+    def __repr__(self):
         return f"Merge({self.from_tokens} -> {self.to_token})"
 
 class IllegalMergeError(ValueError):
@@ -44,7 +44,7 @@ class BytePairEncoding:
         # So if we use values to represent merged tokens, they should start at that range and up, so they won't ever conflict with known chars, and we can use them as embedding table indices later.
         tokens = plain.encode("utf-8")
         num_distinct_tokens = 256
-        
+
         tokens = list(map(int, tokens))
         self.tokens: list[int] = tokens
 
@@ -62,6 +62,12 @@ class BytePairEncoding:
         next_counter = self.merged_token_counter
         self.merged_token_counter += 1
         return next_counter
+
+    def get_vocab_size(self):
+        """
+        The vocab size is exactly the merge counter since it starts at the number of distinct tokens and increases for every merge.
+        """
+        return self.merged_token_counter
 
     def train(self):
         # TODO: Not training the tokenizer yet.
@@ -84,8 +90,8 @@ class BytePairEncoding:
         """
         
         for i in range(self.num_merge_passes):
-            print(f"before pass {i}:")
-            print(self.tokens)
+            # print(f"before pass {i}:")
+            # print(self.tokens)
 
             try:
                 merge, tokens_post_merge = self.merge(self.tokens)
@@ -95,13 +101,12 @@ class BytePairEncoding:
                 print(f"merges halted: {e}")
                 break
 
-            print(f"after pass {i}:")
-            print(f"merge: {merge}")
-            print(self.tokens)
+            # print(f"after pass {i}:")
+            # print(f"merge: {merge}")
+            # print(self.tokens)
 
         # Return the final tokens and vocab size
-        vocab_size = len(set(self.tokens))
-        return self.tokens, vocab_size
+        return self.tokens, self.get_vocab_size()
 
     def merge(self, tokens: list[int]) -> tuple[Merge, list[int]]:
         """
@@ -162,7 +167,13 @@ class BytePairEncoding:
         Outputs:
         - plain: the string
         """
+        # Convert merges to a map of to_token -> from_tokens, and keep doing replacements until the map is empty
+        merges_map: dict[int, tuple[int, int]] = {}
+        for merge in self.merges:
+            merges_map[merge.to_token] = merge.from_tokens
+        # TODO finish.
         pass
+
 
     def save(self, path: Path):
         # Saves state to the given path as JSON.
