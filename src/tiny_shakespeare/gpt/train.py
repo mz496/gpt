@@ -3,7 +3,8 @@ from dataclasses import asdict
 import torch
 import wandb
 
-from ..utils import encode, get_tiny_shakespeare_data, timestamp
+from ..tokenizers.char_encoding import CharEncoding
+from ..utils import get_tiny_shakespeare_data, timestamp
 from .model import GPT, GPTConfig, get_device, save_checkpoint
 
 # --- hyperparameters ---
@@ -91,12 +92,14 @@ def train(step_count: int, model: GPT, tokenized_train_data: torch.Tensor, token
 
 def main():
     torch.manual_seed(TRAIN_SEED)  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
-    train_data, validation_data, vocab = get_tiny_shakespeare_data()
+    train_data, validation_data = get_tiny_shakespeare_data()
+    tokenizer = CharEncoding()
+    tokenizer.train(train_data + validation_data)
     device = get_device()
     print(f"available device: {device}")
 
     config = GPTConfig(
-        vocab_size=len(vocab),
+        vocab_size=tokenizer.get_vocab_size(),
         n_embd=N_EMBD,
         n_head=N_HEAD,
         n_layer=N_LAYER,
@@ -104,8 +107,8 @@ def main():
         dropout=DROPOUT,
     )
     model = GPT(config).to(device)
-    tokenized_train_data = torch.tensor(encode(train_data, vocab)).to(device)
-    tokenized_val_data = torch.tensor(encode(validation_data, vocab)).to(device)
+    tokenized_train_data = torch.tensor(tokenizer.encode_string(train_data)).to(device)
+    tokenized_val_data = torch.tensor(tokenizer.encode_string(validation_data)).to(device)
 
     name = timestamp()
     run = wandb.init(project="gpt-experiments", name=name, config={

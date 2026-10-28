@@ -10,6 +10,8 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
+from .tokenizer import Tokenizer
+
 
 # 1:40pm
 
@@ -24,7 +26,7 @@ class Merge:
 class IllegalMergeError(ValueError):
     """Raised when a merge can't be applied to the given tokens."""
 
-class BytePairEncoding:
+class BytePairEncoding(Tokenizer):
     """
     Implements a simple byte-pair encoding tokenizer.
     Does passes over the input, merging the most commonly seen byte pairs.

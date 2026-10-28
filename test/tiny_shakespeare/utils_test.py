@@ -1,14 +1,6 @@
 import torch
 
 from src.tiny_shakespeare.gpt.train import get_batch
-from src.tiny_shakespeare.utils import decode, encode
-
-
-def test_decode_encode_roundtrip() -> None:
-    text = "First Citizen:\nBefore we proceed any further, hear me speak."
-    vocab = sorted(set(text))
-
-    assert decode(encode("ac", vocab), vocab) == "ac"
 
 
 def test_get_batch_returns_contiguous_windows_with_next_token_as_target() -> None:

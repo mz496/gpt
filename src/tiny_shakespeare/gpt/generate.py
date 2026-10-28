@@ -2,7 +2,8 @@ import argparse
 
 import torch
 
-from ..utils import decode, get_tiny_shakespeare_data
+from ..tokenizers.char_encoding import CharEncoding
+from ..utils import get_tiny_shakespeare_data
 from .model import get_device, load_checkpoint
 
 def parse_args() -> argparse.Namespace:
@@ -17,17 +18,19 @@ def main():
     device = get_device()
     print(f"available device: {device}")
 
-    # The vocab is rebuilt from the data, which is deterministic.
-    _train_data, _validation_data, vocab = get_tiny_shakespeare_data()
+    # The tokenizer is retrained on the data, which is deterministic for the char tokenizer.
+    train_data, validation_data = get_tiny_shakespeare_data()
+    tokenizer = CharEncoding()
+    tokenizer.train(train_data + validation_data)
     model = load_checkpoint(args.run_id, device)
-    if len(vocab) != model.config.vocab_size:
-        raise ValueError(f"vocab size {len(vocab)} does not match the checkpoint's {model.config.vocab_size}")
+    if tokenizer.get_vocab_size() != model.config.vocab_size:
+        raise ValueError(f"vocab size {tokenizer.get_vocab_size()} does not match the checkpoint's {model.config.vocab_size}")
 
     torch.manual_seed(args.generate_seed)  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
     idx = torch.zeros((1, 1), dtype=torch.long).to(device)
     with torch.no_grad():
         result_tokens = model.generate(idx, max_tokens=args.max_tokens)
-    result = decode(result_tokens[0].tolist(), vocab)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType] Bad torch type stubs.
+    result = tokenizer.decode_as_string(result_tokens[0].tolist())  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType] Bad torch type stubs.
     print(result)
 
 if __name__ == "__main__":

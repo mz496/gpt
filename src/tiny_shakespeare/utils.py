@@ -22,7 +22,7 @@ now you have a (1, 100) tensor, decode it.
 from datetime import datetime
 from pathlib import Path
 
-def get_tiny_shakespeare_data() -> tuple[str, str, list[str]]:
+def get_tiny_shakespeare_data() -> tuple[str, str]:
     """
     Fetch tiny Shakespeare data.
     """
@@ -35,22 +35,7 @@ def get_tiny_shakespeare_data() -> tuple[str, str, list[str]]:
     train_split_len = int(n * 0.9)
     train = data[:train_split_len]
     validation = data[train_split_len+1:]
-    vocab = sorted(list(set(data)))
-    return train, validation, vocab
-
-def encode(plain: str, vocab: list[str]) -> list[int]:
-    """
-    Tokenize by character.
-    """
-    token_to_id = {tok: i for i, tok in enumerate(vocab)}
-    return [token_to_id[tok] for tok in list(plain)]
-
-def decode(tokens: list[int], vocab: list[str]) -> str:
-    """
-    Detokenize by character.
-    """
-    id_to_token = {i: tok for i, tok in enumerate(vocab)}
-    return "".join([id_to_token[id] for id in tokens])
+    return train, validation
 
 def timestamp() -> str:
     return datetime.now().strftime("%Y-%m-%dT%H:%M:%S")

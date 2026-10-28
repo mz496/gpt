@@ -2,7 +2,9 @@ import math
 import torch
 from torch.nn import functional as F
 
-from .utils import decode, encode, get_tiny_shakespeare_data
+from .tokenizers.char_encoding import CharEncoding
+from .tokenizers.tokenizer import Tokenizer
+from .utils import get_tiny_shakespeare_data
 
 # --- hyperparameters ---
 # Training
@@ -62,11 +64,11 @@ def estimate_loss(model: torch.nn.Module, tokenized_train_data: torch.Tensor, to
 # - generation is: given some (B, T) input, generate max_new_tokens by continually extending the sequence that many times
 class BigramModel(torch.nn.Module):
 
-    def __init__(self, vocab: list[str]):
+    def __init__(self, vocab_size: int):
         super().__init__()
         # A simple lookup table of C*C learnable params - for each char, which is the char that most likely follows?
         # Each token directly reads off the logits for the next token from this.
-        self.embedding = torch.nn.Embedding(num_embeddings=len(vocab), embedding_dim=len(vocab))
+        self.embedding = torch.nn.Embedding(num_embeddings=vocab_size, embedding_dim=vocab_size)
 
     def forward(self, idx: torch.Tensor, targets: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -124,10 +126,10 @@ class BigramModel(torch.nn.Module):
 
         return output
 
-def train(step_count: int, train_data: str, validation_data: str, vocab: list[str], device: str) -> BigramModel:
-    model = BigramModel(vocab).to(device)
-    tokenized_train_data = torch.tensor(encode(train_data, vocab)).to(device)
-    tokenized_val_data = torch.tensor(encode(validation_data, vocab)).to(device)
+def train(step_count: int, train_data: str, validation_data: str, tokenizer: Tokenizer, device: str) -> BigramModel:
+    model = BigramModel(tokenizer.get_vocab_size()).to(device)
+    tokenized_train_data = torch.tensor(tokenizer.encode_string(train_data)).to(device)
+    tokenized_val_data = torch.tensor(tokenizer.encode_string(validation_data)).to(device)
     # A reasonable lr for adam is 1e-3 to 1e-4.
     optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE)
     for step in range(step_count):
@@ -139,7 +141,7 @@ def train(step_count: int, train_data: str, validation_data: str, vocab: list[st
         # expect logits shape [B, T, C]
         # An untrained model is near-uniform over C tokens, so loss should start near ~ln(C)
         if step % 100 == 0:
-            print(f"step={step:04d} loss={estimate_loss(model, tokenized_train_data, tokenized_val_data)} expected init ~{math.log(len(vocab)):.3f}")
+            print(f"step={step:04d} loss={estimate_loss(model, tokenized_train_data, tokenized_val_data)} expected init ~{math.log(tokenizer.get_vocab_size()):.3f}")
 
         # Write in gradients based on how bad this iteration was.
         loss.backward()
@@ -150,15 +152,17 @@ def train(step_count: int, train_data: str, validation_data: str, vocab: list[st
 
 def main():
     torch.manual_seed(1337)  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
-    train_data, validation_data, vocab = get_tiny_shakespeare_data()
+    train_data, validation_data = get_tiny_shakespeare_data()
+    tokenizer = CharEncoding()
+    tokenizer.train(train_data + validation_data)
     device = get_device()
     print(f"available device: {device}")
 
-    model = train(10000, train_data, validation_data, vocab, device)
+    model = train(10000, train_data, validation_data, tokenizer, device)
 
     idx = torch.zeros((1, 1), dtype=torch.long).to(device)
     result_tokens = model.generate(idx, max_tokens=1000)
-    result = decode(result_tokens[0].tolist(), vocab)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType] Bad torch type stubs.
+    result = tokenizer.decode_as_string(result_tokens[0].tolist())  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType] Bad torch type stubs.
     print(result)
 
 if __name__ == "__main__":
