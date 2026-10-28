@@ -2,5 +2,11 @@
   "typeCheckingMode": "strict",
   "venvPath": ".",
   "venv": ".venv",
-  "include": ["src"]
+  "include": [
+    "src"
+  ],
+  /* Non-empty extraPaths disables pyright's implicit "src" import root */
+  "extraPaths": [
+    "."
+  ]
 }
