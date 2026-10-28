@@ -59,6 +59,7 @@ EVAL_ITERS = 200
 # Model
 # number of embedding dimensions. In the paper, this is d_model.
 N_EMBD = 32
+N_LAYER = 3
 # ---
 
 def get_device():
@@ -264,11 +265,8 @@ class GPT(torch.nn.Module):
         # Transformer blocks
         # Learn longer-range dependencies by passing the enriched vectors along in sequence.
         # e.g. first block is token<>token dependencies; second block might be word<>word dependencies or something
-        self.blocks = torch.nn.Sequential(
-            Block(N_EMBD, n_heads=4),
-            Block(N_EMBD, n_heads=4),
-            Block(N_EMBD, n_heads=4),
-        )
+        self.blocks = torch.nn.Sequential(*[Block(N_EMBD, n_heads=4) for _ in range(N_LAYER)])
+        self.ln_final = torch.nn.LayerNorm(N_EMBD)
 
         # Final linear layer
         # "Encodes token and position into N_EMBD dimensions and back out"
@@ -302,6 +300,7 @@ class GPT(torch.nn.Module):
         x = tok_emb + pos_emb # [B, T, C]
         # apply transformer blocks
         x = self.blocks(x) # [B, T, C]
+        x = self.ln_final(x)
 
         # language model head:
         # [B, T, C] in
