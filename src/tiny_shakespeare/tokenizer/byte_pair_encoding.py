@@ -1,6 +1,12 @@
-# From https://www.reedbeta.com/blog/programmers-intro-to-unicode/
-# From Karpathy's "Let's build the GPT Tokenizer", ~27:46
-from collections import Counter, defaultdict
+"""
+Byte-pair encoding implementation
+
+From https://www.reedbeta.com/blog/programmers-intro-to-unicode/
+From Karpathy's "Let's build the GPT Tokenizer", ~27:46
+
+"""
+
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,6 +21,8 @@ class Merge:
     def __str__(self):
         return f"Merge({self.from_tokens} -> {self.to_token})"
 
+class IllegalMergeError(ValueError):
+    """Raised when a merge can't be applied to the given tokens."""
 
 class BytePairEncoding:
     """
@@ -38,16 +46,15 @@ class BytePairEncoding:
         self.tokens: list[int] = tokens
 
         # Because we're using UTF-8, our tokens will all be in the range [0, 255].
-        # So if we use values to represent merged tokens, they should be outside that range.
-        # We use negatives to make it easy to see while keeping them small.
-        self.merged_token_counter: int = -1
+        # So if we use values to represent merged tokens, they should be outside that range, and all positive, so we can use them as embedding table indices later.
+        self.merged_token_counter: int = 256
 
     def get_next_merged_token_counter(self):
         """
         Returns the next free merged-token-counter and then advances it for the next caller.
         """
         next_counter = self.merged_token_counter
-        self.merged_token_counter -= 1
+        self.merged_token_counter += 1
         return next_counter
 
     def train(self):
@@ -71,14 +78,18 @@ class BytePairEncoding:
         """
         
         # Do N merge passes
-        merge_passes = 3
+        merge_passes = 4
         for i in range(merge_passes):
             print(f"before pass {i}:")
             print(self.tokens)
 
-            merge, tokens_post_merge = self.merge(self.tokens)
-            self.merges.append(merge)
-            self.tokens = tokens_post_merge
+            try:
+                merge, tokens_post_merge = self.merge(self.tokens)
+                self.merges.append(merge)
+                self.tokens = tokens_post_merge
+            except IllegalMergeError as e:
+                print(f"merges halted: {e}")
+                break
 
             print(f"after pass {i}:")
             print(f"merge: {merge}")
@@ -101,16 +112,16 @@ class BytePairEncoding:
         - tokens: the tokens post-merge
         """
         if len(tokens) <= 2:
-            raise Exception("tokens must be length > 2")
+            raise IllegalMergeError("tokens must be length > 2")
         # Look for the most common byte-pair across the tokens
         # Note we're slightly off here in case of long runs like aaa - this counts 2 occurrences of aa, but we only can compress it once.
         # Align every token with its next token, dropping the last.
         counter = Counter(zip(tokens, tokens[1:]))
+        counter_most_common: tuple[tuple[int, int], int] = counter.most_common(1)[0]
         # The tuple[int, int] pair.
-        from_tokens = (counter.most_common(1))[0][0]
-        from_tokens_freq = (counter.most_common(1))[0][1]
+        from_tokens, from_tokens_freq = counter_most_common
         if from_tokens_freq == 1:
-            raise Exception("no more merges possible")
+            raise IllegalMergeError(f"no more merges possible, most common pair only occurs once: {counter_most_common}")
         to_token = self.get_next_merged_token_counter()
 
         # Do the substitution, going forward
@@ -123,6 +134,7 @@ class BytePairEncoding:
         """
         Replaces from_tokens with to_token, going forward only, thus replacing the first occurrence(s) of from_tokens with to_token.
         e.g. 1,1,1,1,1 where to_token is X becomes X,X,1.
+        Pure.
         """
         out: list[int] = []
         i = 0
