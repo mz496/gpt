@@ -65,9 +65,17 @@ class BytePairEncoding:
         """
         return self.merged_token_counter
 
-    def train(self):
-        # TODO: Not training the tokenizer yet.
-        pass
+    def train(self, s: str):
+        """Learns the merges based on the data frequencies."""
+        tokens = self.string_to_bytes(s)
+
+        for _ in range(self.num_merge_passes):
+            try:
+                merge = self.merge(tokens)
+                self.merges.append(merge)
+            except IllegalMergeError as e:
+                print(f"merges halted: {e}")
+                break
 
     def string_to_bytes(self, plain: str) -> list[int]:
         """plain -> list of 0-255 ints"""
@@ -78,16 +86,15 @@ class BytePairEncoding:
         """list of 0-255 ints -> plain"""
         return bytes(byte_values).decode("utf-8", errors="replace")
 
-    def encode_string(self, s: str) -> tuple[list[int], int]:
+    def encode_string(self, s: str) -> list[int]:
         return self.encode(self.string_to_bytes(s))
 
-    def encode(self, tokens: list[int]) -> tuple[list[int], int]:
+    def encode(self, tokens: list[int]) -> list[int]:
         """
         Encode the string as a sequence of tokens.
 
         Writes state:
         - the merges used during the byte-pair encoding process
-        - the vocab
 
         Inputs:
         - tokens: the int array of bytes (0-255)
@@ -96,37 +103,24 @@ class BytePairEncoding:
         - tokens: the int array of tokens
         - vocab_size: the size of the vocab
         """
-        
-        for i in range(self.num_merge_passes):
-            # print(f"before pass {i}:")
-            # print(self.tokens)
+        if len(self.merges) == 0:
+            raise Exception("BPE has not been trained yet; call train() first")
+        for merge in self.merges:
+            # Do the substitution, going forward
+            tokens = self.replace_for_encode(tokens, merge.from_tokens, merge.to_token)
+        return tokens
 
-            try:
-                merge, tokens_post_merge = self.merge(tokens)
-                self.merges.append(merge)
-                tokens = tokens_post_merge
-            except IllegalMergeError as e:
-                print(f"merges halted: {e}")
-                break
-
-            # print(f"after pass {i}:")
-            # print(f"merge: {merge}")
-            # print(self.tokens)
-
-        # Return the final tokens and vocab size
-        return tokens, self.get_vocab_size()
-
-    def merge(self, tokens: list[int]) -> tuple[Merge, list[int]]:
+    def merge(self, tokens: list[int]) -> Merge:
         """
-        One merge pass. Pure.
-        aaab -> Zab (but using a token that's outside the vocab)
+        Find the best merge to do based on the highest pair frequency and return it.
+        aaabaa -> ZabZ (but using a token that's outside the vocab)
+        Pure.
 
         Inputs:
         - tokens: input tokens
 
         Outputs:
         - merge: the Merge that was done
-        - tokens: the tokens post-merge
         """
         if len(tokens) <= 2:
             raise IllegalMergeError("tokens must be length > 2")
@@ -141,11 +135,7 @@ class BytePairEncoding:
             raise IllegalMergeError(f"no more merges possible, most common pair only occurs once: {counter_most_common}")
         to_token = self.get_next_merged_token_counter()
 
-        # Do the substitution, going forward
-        tokens = self.replace_for_encode(tokens, from_tokens, to_token)
-
-        merge = Merge(from_tokens, to_token)
-        return merge, tokens
+        return Merge(from_tokens, to_token)
         
     def replace_for_encode(self, tokens: list[int], from_tokens: tuple[int, int], to_token: int) -> list[int]:
         """
@@ -177,6 +167,8 @@ class BytePairEncoding:
         Outputs:
         - the int array of bytes (0-255)
         """
+        if len(self.merges) == 0:
+            raise Exception("BPE has not been trained yet; call train() first")
         for merge in reversed(self.merges):
             tokens = self.replace_for_decode(tokens, merge.to_token, merge.from_tokens)
         return tokens
