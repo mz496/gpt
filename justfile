@@ -5,8 +5,8 @@ test *args:
 bigram *args:
     uv run --locked -m src.tiny_shakespeare.bigram {{args}}
 
-tokenize *args:
-    uv run --locked -m src.tiny_shakespeare.tokenizer.tokenize {{args}}
+tokenize-check *args:
+    uv run --locked -m src.tiny_shakespeare.tokenizers.tokenize_check {{args}}
 
 gpt-train *args:
     uv run --locked -m src.tiny_shakespeare.gpt.train {{args}}
