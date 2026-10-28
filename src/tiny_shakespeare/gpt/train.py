@@ -3,7 +3,7 @@ from dataclasses import asdict
 import torch
 import wandb
 
-from ..utils import encode, get_data, timestamp
+from ..utils import encode, get_tiny_shakespeare_data, timestamp
 from .model import GPT, GPTConfig, get_device, save_checkpoint
 
 # --- hyperparameters ---
@@ -91,7 +91,7 @@ def train(step_count: int, model: GPT, tokenized_train_data: torch.Tensor, token
 
 def main():
     torch.manual_seed(TRAIN_SEED)  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
-    train_data, validation_data, vocab = get_data()
+    train_data, validation_data, vocab = get_tiny_shakespeare_data()
     device = get_device()
     print(f"available device: {device}")
 

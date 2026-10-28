@@ -2,7 +2,7 @@ from pathlib import Path
 
 from src.tiny_shakespeare.tokenizer.byte_pair_encoding import BytePairEncoding
 
-INPUT_PATH = Path(__file__).parent.parent / "input.txt"
+INPUT_PATH = Path(__file__).parent.parent / "input_data" / "tiny_shakespeare.txt"
 
 
 def main():

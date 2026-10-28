@@ -2,7 +2,7 @@ import math
 import torch
 from torch.nn import functional as F
 
-from .utils import decode, encode, get_data
+from .utils import decode, encode, get_tiny_shakespeare_data
 
 # --- hyperparameters ---
 # Training
@@ -150,7 +150,7 @@ def train(step_count: int, train_data: str, validation_data: str, vocab: list[st
 
 def main():
     torch.manual_seed(1337)  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
-    train_data, validation_data, vocab = get_data()
+    train_data, validation_data, vocab = get_tiny_shakespeare_data()
     device = get_device()
     print(f"available device: {device}")
 

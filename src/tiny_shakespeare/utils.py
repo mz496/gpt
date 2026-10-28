@@ -22,14 +22,14 @@ now you have a (1, 100) tensor, decode it.
 from datetime import datetime
 from pathlib import Path
 
-def get_data() -> tuple[str, str, list[str]]:
+def get_tiny_shakespeare_data() -> tuple[str, str, list[str]]:
     """
     Fetch tiny Shakespeare data.
     """
     # url = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
     # with urlopen(url) as f:
     #     data: str = f.read().decode("utf-8")
-    with open(Path(__file__).parent / "input.txt") as f:
+    with open(Path(__file__).parent / "input_data" / "tiny_shakespeare.txt") as f:
         data: str = f.read()
     n = len(data)
     train_split_len = int(n * 0.9)

@@ -2,7 +2,7 @@ import argparse
 
 import torch
 
-from ..utils import decode, get_data
+from ..utils import decode, get_tiny_shakespeare_data
 from .model import get_device, load_checkpoint
 
 def parse_args() -> argparse.Namespace:
@@ -18,7 +18,7 @@ def main():
     print(f"available device: {device}")
 
     # The vocab is rebuilt from the data, which is deterministic.
-    _train_data, _validation_data, vocab = get_data()
+    _train_data, _validation_data, vocab = get_tiny_shakespeare_data()
     model = load_checkpoint(args.run_id, device)
     if len(vocab) != model.config.vocab_size:
         raise ValueError(f"vocab size {len(vocab)} does not match the checkpoint's {model.config.vocab_size}")
