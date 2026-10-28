@@ -67,6 +67,17 @@ class BytePairEncoding(Tokenizer):
         """
         return self.merged_token_counter
 
+    def get_vocab(self) -> dict[int, tuple[int, ...]]:
+        """
+        Maps every token id to the full sequence of bytes (0-255) it stands for.
+        Merges are unrolled in creation order, so e.g. 1,2 -> 257 and 257,1 -> 258 gives 258 -> (1, 2, 1).
+        """
+        vocab: dict[int, tuple[int, ...]] = {i: (i,) for i in range(256)}
+        for merge in self.merges:
+            a, b = merge.from_tokens
+            vocab[merge.to_token] = vocab[a] + vocab[b]
+        return vocab
+
     def train(self, s: str):
         """Learns the merges based on the data frequencies."""
         tokens = self.string_to_bytes(s)
@@ -74,7 +85,9 @@ class BytePairEncoding(Tokenizer):
         for _ in range(self.num_merge_passes):
             try:
                 merge = self.merge(tokens)
+                # Record the merge, then apply it so we keep shrinking the string.
                 self.merges.append(merge)
+                tokens = self.replace_for_encode(tokens, merge.from_tokens, merge.to_token)
             except IllegalMergeError as e:
                 print(f"merges halted: {e}")
                 break
