@@ -30,7 +30,7 @@ class BytePairEncoding:
     Does passes over the input, merging the most commonly seen byte pairs.
     """
 
-    def __init__(self, plain: str, target_vocab_size: int):
+    def __init__(self, target_vocab_size: int):
         """
         Initialized with the plaintext and the target vocab size.
         """
@@ -42,11 +42,7 @@ class BytePairEncoding:
 
         # Init the vocab: all distinct tokens. Due to our UTF-8 encoding, the count of distinct tokens is 2**8 = 256.
         # So if we use values to represent merged tokens, they should start at that range and up, so they won't ever conflict with known chars, and we can use them as embedding table indices later.
-        tokens = plain.encode("utf-8")
         num_distinct_tokens = 256
-
-        tokens = list(map(int, tokens))
-        self.tokens: list[int] = tokens
 
         self.merged_token_counter: int = num_distinct_tokens
 
@@ -73,7 +69,19 @@ class BytePairEncoding:
         # TODO: Not training the tokenizer yet.
         pass
 
-    def encode(self) -> tuple[list[int], int]:
+    def string_to_bytes(self, plain: str) -> list[int]:
+        """plain -> list of 0-255 ints"""
+        tokens = plain.encode("utf-8")
+        return list(map(int, tokens))
+
+    def bytes_to_string(self, byte_values: list[int]) -> str:
+        """list of 0-255 ints -> plain"""
+        return bytes(byte_values).decode("utf-8", errors="replace")
+
+    def encode_string(self, s: str) -> tuple[list[int], int]:
+        return self.encode(self.string_to_bytes(s))
+
+    def encode(self, tokens: list[int]) -> tuple[list[int], int]:
         """
         Encode the string as a sequence of tokens.
 
@@ -82,15 +90,12 @@ class BytePairEncoding:
         - the vocab
 
         Inputs:
-        - plain: the string
+        - tokens: the int array of bytes (0-255)
 
         Outputs:
         - tokens: the int array of tokens
         - vocab_size: the size of the vocab
         """
-
-        # Copy tokens so that self.tokens is never modified.
-        tokens = self.tokens[::]
         
         for i in range(self.num_merge_passes):
             # print(f"before pass {i}:")
@@ -159,8 +164,10 @@ class BytePairEncoding:
                 i += 1
         return out
     
+    def decode_as_string(self, tokens: list[int]) -> str:
+        return self.bytes_to_string(self.decode(tokens))
 
-    def decode(self, tokens: list[int]):
+    def decode(self, tokens: list[int]) -> list[int]:
         """
         Decodes the tokens using the state written during encode.
 
@@ -168,7 +175,7 @@ class BytePairEncoding:
         - tokens: the int array of tokens
 
         Outputs:
-        - plain: the string
+        - the int array of bytes (0-255)
         """
         for merge in reversed(self.merges):
             tokens = self.replace_for_decode(tokens, merge.to_token, merge.from_tokens)
