@@ -1,0 +1,15 @@
+# Values Karpathy uses in the GPT video.
+
+# Training
+train_steps: 1500
+train_seed: 1337
+batch_size: 64
+learning_rate: 3.0e-4
+eval_iters: 200
+
+# Model
+n_embd: 384
+n_head: 6
+n_layer: 6
+block_size: 256
+dropout: 0.2

@@ -4,29 +4,10 @@ from dataclasses import asdict
 import torch
 import wandb
 
+from ..config import CONFIG_NAMES, TrainConfig, load_config
 from ..tokenizers.utils import TOKENIZER_NAMES, make_tokenizer
 from ..utils import get_tiny_shakespeare_data, timestamp
 from .model import GPT, GPTConfig, get_device, save_checkpoint
-
-# --- hyperparameters ---
-
-# Training
-TRAIN_STEPS = 1500
-TRAIN_SEED = 1337
-# how many independent sequences will we look at in parallel?
-BATCH_SIZE = 64
-LEARNING_RATE = 3e-4
-# for loss estimation
-EVAL_ITERS = 200
-
-# Model (vocab_size comes from the data)
-N_EMBD = 384
-N_HEAD = 6
-N_LAYER = 6
-# what is the max context length for predictions?
-BLOCK_SIZE = 256
-DROPOUT = 0.2
-# ---
 
 def get_batch(tokenized: torch.Tensor, batch_size: int, block_size: int) -> tuple[torch.Tensor, torch.Tensor]:
     """
@@ -51,36 +32,36 @@ def get_batch(tokenized: torch.Tensor, batch_size: int, block_size: int) -> tupl
     return x, y
 
 @torch.no_grad
-def estimate_loss(model: torch.nn.Module, tokenized_train_data: torch.Tensor, tokenized_val_data: torch.Tensor) -> dict[str, float]:
+def estimate_loss(cfg: TrainConfig, model: torch.nn.Module, tokenized_train_data: torch.Tensor, tokenized_val_data: torch.Tensor) -> dict[str, float]:
     """
-    Estimate loss over train, validation based on EVAL_ITERS batches.
+    Estimate loss over train, validation based on cfg.eval_iters batches.
     """
     model.eval()
     result: dict[str, float] = {}
     for dataset_type, data in [("train", tokenized_train_data), ("validation", tokenized_val_data)]:
         # Compute the mean per dataset type.
-        losses = torch.zeros(EVAL_ITERS)
-        for k in range(EVAL_ITERS):
-            contexts, targets = get_batch(data, BATCH_SIZE, BLOCK_SIZE)
+        losses = torch.zeros(cfg.eval_iters)
+        for k in range(cfg.eval_iters):
+            contexts, targets = get_batch(data, cfg.batch_size, cfg.block_size)
             _logits, loss = model(contexts, targets)
             losses[k] = loss
         result[dataset_type] = losses.mean().item()
     model.train()
     return result
 
-def train(step_count: int, model: GPT, tokenized_train_data: torch.Tensor, tokenized_val_data: torch.Tensor, run: wandb.Run) -> GPT:
+def train(cfg: TrainConfig, step_count: int, model: GPT, tokenized_train_data: torch.Tensor, tokenized_val_data: torch.Tensor, run: wandb.Run) -> GPT:
     # A reasonable lr for adam is 1e-3 to 1e-4.
-    optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.learning_rate)
     for step in range(step_count):
         # Zero out gradients for this iteration.
         model.zero_grad()
 
-        contexts, targets = get_batch(tokenized_train_data, batch_size=BATCH_SIZE, block_size=BLOCK_SIZE)
+        contexts, targets = get_batch(tokenized_train_data, batch_size=cfg.batch_size, block_size=cfg.block_size)
         _logits, loss = model(contexts, targets)
         # expect logits shape [B, T, C]
         # An untrained model is near-uniform over C tokens, so loss should start near ~ln(C)
         if step % 50 == 0 or step == step_count-1:
-            losses = estimate_loss(model, tokenized_train_data, tokenized_val_data)
+            losses = estimate_loss(cfg, model, tokenized_train_data, tokenized_val_data)
             print(f"step={step:04d} loss={losses}")
             run.log({"train/loss": losses["train"], "validation/loss": losses["validation"]}, step=step)
 
@@ -93,11 +74,13 @@ def train(step_count: int, model: GPT, tokenized_train_data: torch.Tensor, token
 
 def main():
     parser = argparse.ArgumentParser(description="Train a GPT on tiny shakespeare.")
+    parser.add_argument("--config", choices=CONFIG_NAMES, default="default", help="which config in configs/ to use")
     parser.add_argument("--tokenizer", choices=TOKENIZER_NAMES, default="char", help="which tokenizer to use")
     parser.add_argument("--bpe-vocab-size", type=int, default=512, help="target vocab size when --tokenizer=bpe")
     args = parser.parse_args()
+    cfg = load_config(args.config)
 
-    torch.manual_seed(TRAIN_SEED)  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
+    torch.manual_seed(cfg.train_seed)  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
     train_data, validation_data = get_tiny_shakespeare_data()
     tokenizer = make_tokenizer(args.tokenizer, args.bpe_vocab_size)
     tokenizer.train(train_data + validation_data)
@@ -106,11 +89,11 @@ def main():
 
     config = GPTConfig(
         vocab_size=len(tokenizer.get_vocab()),
-        n_embd=N_EMBD,
-        n_head=N_HEAD,
-        n_layer=N_LAYER,
-        block_size=BLOCK_SIZE,
-        dropout=DROPOUT,
+        n_embd=cfg.n_embd,
+        n_head=cfg.n_head,
+        n_layer=cfg.n_layer,
+        block_size=cfg.block_size,
+        dropout=cfg.dropout,
     )
     model = GPT(config).to(device)
     tokenized_train_data = torch.tensor(tokenizer.encode_string(train_data)).to(device)
@@ -119,17 +102,13 @@ def main():
     name = timestamp()
     run = wandb.init(project="gpt-experiments", name=name, config={
         **asdict(config),
+        "config_name": args.config,
         "tokenizer": args.tokenizer,
-        "train_seed": TRAIN_SEED,
-        "train_steps": TRAIN_STEPS,
-        "batch_size": BATCH_SIZE,
-        "learning_rate": LEARNING_RATE,
-        "eval_iters": EVAL_ITERS,
     })
     # A unique and sortable run ID to identify this run.
     run_id = f"{name}_{run.id}"
 
-    model = train(TRAIN_STEPS, model, tokenized_train_data, tokenized_val_data, run)
+    model = train(cfg, cfg.train_steps, model, tokenized_train_data, tokenized_val_data, run)
 
     checkpoint_path = save_checkpoint(model, run_id, args.tokenizer, args.bpe_vocab_size)
     print(f"saved checkpoint to {checkpoint_path}")

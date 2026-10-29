@@ -1,0 +1,13 @@
+# Training
+train_steps: 1500
+train_seed: 1337
+batch_size: 32
+learning_rate: 1.0e-3
+eval_iters: 200
+
+# Model
+n_embd: 32
+n_head: 4
+n_layer: 3
+block_size: 8
+dropout: 0.2
