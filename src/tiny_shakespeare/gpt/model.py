@@ -143,14 +143,14 @@ class Head(torch.nn.Module):
 
         """
         # [B, T, N_EMBD] -> [B, T, head_size]
-        _B, T, C = idx.shape
+        _B, T, _C = idx.shape
         q: torch.Tensor = self.query(idx)
         k: torch.Tensor = self.key(idx)
         v: torch.Tensor = self.value(idx)
+        _, _, d_k = k.shape
 
         # [B, T, head_size] * [B, head_size, T] = [B, T, T]
-        # d_k here is C, or N_EMBD.
-        wei = q @ k.transpose(-2, -1) * (C ** -0.5)
+        wei = q @ k.transpose(-2, -1) * (d_k ** -0.5)
         # [T, T] masked-fill lower-triangular with -inf
         # This avoids tokens from being influenced by future tokens when we compute the output
         wei = wei.masked_fill(self.tril[:T, :T] == 0, float("-inf"))
