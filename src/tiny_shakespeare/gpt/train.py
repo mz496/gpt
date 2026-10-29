@@ -85,7 +85,12 @@ def main():
     torch.manual_seed(cfg.train_seed)  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
     train_data, validation_data = get_tiny_shakespeare_data()
     tokenizer = make_tokenizer(args.tokenizer, args.bpe_vocab_size)
-    tokenizer.train(train_data + validation_data)
+    # NOTE: By using only train data for the tokenization:
+    # - CharTokenizer technically could fail when asked to encode the validation set, since the tokenizer only knows about chars in the train set.
+    #   - In practice, this does not happen on tiny shakespeare (there is nothing in the validation set that is unrepresented in the train set).
+    #   - (This is because it's not a true byte-level tokenizer; ie roughly just A-Z + a-z + punctuation and not all 256 bytes).
+    # - This is mostly to make BPETokenizer/RegexBPETokenizer losses more accurate since they learn their frequencies/merges only on train.
+    tokenizer.train(train_data)
     device = get_device()
     print(f"available device: {device}")
 

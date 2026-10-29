@@ -92,9 +92,7 @@ Implemented the byte-pair encoding tokenizer, and refactored the char-based toke
 The result of BPE on the tiny shakespeare data with a target vocab size of 300, this looks reasonable so far:
 
 ```
-uv run --locked -m src.tiny_shakespeare.tokenizers.tokenize_check 
-294896 chars -> 208317 tokens
-merges (unrolled to bytes):
+[... 0-255 omitted ...]
   256: 101,32 ('e ')
   257: 116,104 ('th')
   258: 116,32 ('t ')

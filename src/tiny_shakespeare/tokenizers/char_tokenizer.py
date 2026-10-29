@@ -5,7 +5,8 @@ from .tokenizer import Tokenizer
 
 class CharTokenizer(Tokenizer):
     """
-    Tokenizes by character: the vocab is the sorted set of distinct characters seen in train.
+    Tokenizes by character: the vocab is the sorted set of distinct characters seen in the dataset.
+    Roughly a trimmed down version of a byte-level tokenizer, but without all 256 bytes.
     """
 
     def __init__(self):
