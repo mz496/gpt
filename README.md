@@ -1,5 +1,11 @@
 # GPT implementation from scratch
 
+> [!IMPORTANT]
+> Part of a series on contributing to AI safety and understandability by building intuition in order to ask and answer better questions
+> 1. [[repo]](https://github.com/mz496/mnist) Preliminaries (LeNet; neural nets; workflow)
+> 2. [here] Transformers (attention; tokenization; finetuning)
+> 3. [[repo]](https://github.com/mz496/rl) Reinforcement learning (classical; RLHF; RLVR)
+
 Following Karpathy's https://karpathy.ai/zero-to-hero.html -> Let's build GPT
 
 
