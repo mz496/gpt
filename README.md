@@ -1,29 +1,47 @@
+# GPT implementation from scratch
+
 Following Karpathy's https://karpathy.ai/zero-to-hero.html -> Let's build GPT
 
 
+## Lab notebook
 
-# Lab notebook
+### Oct 20-27
 
-Toward the end of the video, Karpathy starts speedrunning some things that are not super obvious in the paper (more so general neural net training tricks) so I decided to log each of the changes:
+**Implemented the decoder-only transformer and some optimizations to get validation loss low enough so that the output somewhat looks like prose**
+
+Recording loss numbers as I walk through the tutorial:
 
 With 5000 steps,
 
-Adding residual pathways:
-- train loss 1.91, val loss 2.04
+- One attention head: val loss 2.4 (? - a bit uncertain, was not super strict in recording)
+- Multi-head attention: val loss 2.4 (? - a bit uncertain, was not super strict in recording)
+- Increase batch size from 8 to 32: val loss 2.26
+- Adding the feedforward layer to the transformer: val loss 2.24
+- Adding multiple transformer blocks: val loss 2.38
 
-Adding two layer norms around the self-attention and feed forward blocks:
-- train loss 1.91, val loss 2.03
+Here Karpathy starts speedrunning some things that are not super obvious in the paper (more so general neural net training tricks):
 
-Adding a last layer norm around transformer blocks:
-- train loss 1.89, validation loss 2.01
+- Adding residual pathways: train loss 1.91, val loss 2.04
+- Adding two layer norms around the self-attention and feed forward blocks: train loss 1.91, val loss 2.03
+- Adding a last layer norm around transformer blocks: train loss 1.89, validation loss 2.01
+- Adding dropout with p=0.2: train loss 2.016, validation loss 2.136. Slightly regressed; Karpathy scales up before showing these numbers but I was curious what would happen if not.
 
-Adding dropout with p=0.2:
-- train loss 2.016, validation loss 2.136
-- I think I need to start scaling up now
+Now, upping the parameters to match Karpathy's:
+```
+- train_steps: 1500
+- n_embd: 384
+- n_head: 6
+- n_layer: 6
+- batch_size: 64
+- block_size: 256
+- vocab_size: 62
+- learning_rate: 0.0003
+```
 
-Upping the parameters to match Karpathy's:
 - After 30 minutes of training on my macbook, I killed it early because it already reached a reasonable value, not sure exactly why my numbers were consistently slightly lower than Karpathy's though. Perhaps I was pushing the parameters harder somehow.
-- `step=1500 loss={'train': 1.2820947170257568, 'validation': 1.4961657524108887}`
+- Loss numbers are much improved:
+  - `train:      1.2820947170257568`
+  - `validation: 1.4961657524108887`
 
 ```
 'buck me; being his are did so with ston.
@@ -117,3 +135,19 @@ merges (unrolled to bytes):
   299: 115,116 ('st')
 ```
 
+I then bumped down the params back to pre-scale-up to get a good baseline on the char method on fewer iterations:
+
+- train_steps: 1500
+- batch_size: 32
+- block_size: 8
+- dropout: 0.2
+- learning_rate: 0.001
+- n_embd: 32
+- n_head: 4
+- n_layer: 3
+- tokenizer: char
+- vocab_size: 62
+
+Loss numbers:
+- `train:      2.233491897583008`
+- `validation: 2.3629558086395264`
