@@ -27,6 +27,7 @@ Note that renaming a run changes its name everywhere, not only in the view.
 import argparse
 import subprocess
 import tempfile
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
@@ -79,15 +80,27 @@ def parse_wandb_run_id(log: str) -> str:
     return lines[-1].removeprefix("run_id=").rsplit("_", 1)[-1]
 
 
+def log(message: str) -> None:
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] {message}", flush=True)
+
+
 def train(spec: RunSpec, group: str, log_dir: Path) -> str:
     """Trains one run, writing its output to a log file. Returns the wandb run id. Raises if training fails."""
     command = ["just", "gpt-train", "--tokenizer", spec.tokenizer, "--group", group]
     if spec.bpe_vocab_size is not None:
         command += ["--bpe-vocab-size", str(spec.bpe_vocab_size)]
     log_path = log_dir / f"{spec.label}.log"
-    with open(log_path, "w") as log:
-        subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, check=True)
-    return parse_wandb_run_id(log_path.read_text())
+    log(f"{spec.label}: training started (output in {log_path})")
+    start = time.monotonic()
+    try:
+        with open(log_path, "w") as log_file:
+            subprocess.run(command, stdout=log_file, stderr=subprocess.STDOUT, check=True)
+    except subprocess.CalledProcessError:
+        log(f"{spec.label}: training FAILED after {time.monotonic() - start:.0f}s")
+        raise
+    run_id = parse_wandb_run_id(log_path.read_text())
+    log(f"{spec.label}: training finished in {time.monotonic() - start:.0f}s (wandb run {run_id})")
+    return run_id
 
 
 def main():
@@ -105,13 +118,14 @@ def main():
     view_id = create_view(entity, args.project, view_name)
     log_dir = args.log_dir or Path(tempfile.mkdtemp())
     log_dir.mkdir(parents=True, exist_ok=True)
-    print(f"view {view_id} ({view_name}); training logs in {log_dir}")
+    log(f"view {view_id} ({view_name}); training logs in {log_dir}")
 
     specs = build_specs(args.sizes)
 
     # Phase 1: train. The pool size is what caps the parallelism.
     run_ids: dict[str, str] = {}
     failures: list[str] = []
+    log(f"training {len(specs)} runs, at most {args.max_parallel} at a time")
     with ThreadPoolExecutor(max_workers=args.max_parallel) as pool:
         futures = {spec.label: pool.submit(train, spec, view_name, log_dir) for spec in specs}
         for spec in specs:
@@ -119,20 +133,29 @@ def main():
                 run_ids[spec.label] = futures[spec.label].result()
             except (subprocess.CalledProcessError, ValueError) as e:
                 failures.append(f"{spec.label}: {e}")
+    log(f"training done: {len(run_ids)} succeeded, {len(failures)} failed")
 
     # Phase 2: rename the runs, then add and color them all in one load/save of the view.
+    log("wandb: creating API client")
     api = wandb.Api()
+    log(f"wandb: loading view {view_id}")
     workspace = load_view(entity, args.project, view_id)
+    log("wandb: view loaded")
     for spec in specs:
         run_id = run_ids.get(spec.label)
         if run_id is None:
             continue
+        log(f"{spec.label}: fetching run {run_id}")
         run = api.run(f"{entity}/{args.project}/{run_id}")
+        log(f"{spec.label}: renaming to {spec.display_name!r}")
         run.name = spec.display_name
         run.update()
         add_run(workspace, run_id)
         set_run_color(workspace, run_id, spec.color)
+        log(f"{spec.label}: renamed, added to view, colored #{spec.color}")
+    log(f"wandb: saving view {view_id}")
     workspace.save()
+    log("wandb: view saved")
 
     print(f"{len(run_ids)}/{len(specs)} runs added to view {view_id}")
     if failures:
