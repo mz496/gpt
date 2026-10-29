@@ -1,23 +1,47 @@
+import argparse
+import math
+from collections import Counter
 from pathlib import Path
 
 from src.tiny_shakespeare.tokenizers.byte_pair_encoding import BytePairEncoding
+from src.tiny_shakespeare.tokenizers.utils import TOKENIZER_NAMES, make_tokenizer
 from src.tiny_shakespeare.utils import bytes_to_string
 
 INPUT_PATH = Path(__file__).parent.parent / "input_data" / "tiny_shakespeare.txt"
 
 
-def main():
-    bpe = BytePairEncoding(300) # Temp: One merge pass.
-    text = INPUT_PATH.read_text()
-    bpe.train(text)
-    tokens = bpe.encode_string(text)
-    print(f"{len(text)} chars -> {len(tokens)} tokens")
+def unigram_entropy(tokens: list[int]) -> float:
+    """Entropy in nats of the token frequencies, ignoring context: -sum p ln p.
+    i.e. If we just predicted the next char solely based on frequencies.
+    """
+    total = len(tokens)
+    return -sum(c / total * math.log(c / total) for c in Counter(tokens).values())
 
-    vocab = bpe.get_vocab()
-    print("merges (unrolled to bytes):")
-    for merge in bpe.merges:
-        byte_values = list(vocab[merge.to_token])
-        print(f"  {merge.to_token}: {merge.from_tokens[0]},{merge.from_tokens[1]} ({bytes_to_string(byte_values)!r})")
+
+def main():
+    parser = argparse.ArgumentParser(description="Train a tokenizer on tiny shakespeare and print stats about it.")
+    parser.add_argument("--tokenizer", choices=TOKENIZER_NAMES, default="bpe", help="which tokenizer to check")
+    parser.add_argument("--bpe-vocab-size", type=int, default=512, help="target vocab size when --tokenizer=bpe")
+    args = parser.parse_args()
+
+    tokenizer = make_tokenizer(args.tokenizer, args.bpe_vocab_size)
+    text = INPUT_PATH.read_text()
+    tokenizer.train(text)
+    tokens = tokenizer.encode_string(text)
+    print(f"{len(text)} chars -> {len(tokens)} tokens ({len(text) / len(tokens):.3f} chars/token)")
+
+    # A model that ignores context and just predicts token frequencies plateaus at this loss.
+    vocab_size = len(tokenizer.get_vocab())
+    print(f"vocab size {vocab_size}: uniform loss ln(V)={math.log(vocab_size):.3f}")
+    entropy = unigram_entropy(tokens)
+    print(f"unigram entropy: {entropy:.3f} nats/token, {entropy * len(tokens) / len(text):.3f} nats/char")
+
+    if isinstance(tokenizer, BytePairEncoding):
+        vocab = tokenizer.get_vocab()
+        print("merges (unrolled to bytes):")
+        for merge in tokenizer.merges:
+            byte_values = list(vocab[merge.to_token])
+            print(f"  {merge.to_token}: {merge.from_tokens[0]},{merge.from_tokens[1]} ({bytes_to_string(byte_values)!r})")
 
 if __name__ == "__main__":
     main()
