@@ -2,7 +2,7 @@ import argparse
 
 import torch
 
-from ..tokenizers.char_encoding import CharEncoding
+from ..tokenizers.utils import make_tokenizer
 from ..utils import get_tiny_shakespeare_data
 from .model import get_device, load_checkpoint
 
@@ -18,11 +18,11 @@ def main():
     device = get_device()
     print(f"available device: {device}")
 
-    # The tokenizer is retrained on the data, which is deterministic for the char tokenizer.
+    model, tokenizer_name, bpe_vocab_size = load_checkpoint(args.run_id, device)
+    # The tokenizer is retrained on the data, which is deterministic for both tokenizers.
     train_data, validation_data = get_tiny_shakespeare_data()
-    tokenizer = CharEncoding()
+    tokenizer = make_tokenizer(tokenizer_name, bpe_vocab_size)
     tokenizer.train(train_data + validation_data)
-    model = load_checkpoint(args.run_id, device)
     if len(tokenizer.get_vocab()) != model.config.vocab_size:
         raise ValueError(f"vocab size {len(tokenizer.get_vocab())} does not match the checkpoint's {model.config.vocab_size}")
 

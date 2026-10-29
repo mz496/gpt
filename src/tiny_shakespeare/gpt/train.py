@@ -1,9 +1,10 @@
+import argparse
 from dataclasses import asdict
 
 import torch
 import wandb
 
-from ..tokenizers.char_encoding import CharEncoding
+from ..tokenizers.utils import TOKENIZER_NAMES, make_tokenizer
 from ..utils import get_tiny_shakespeare_data, timestamp
 from .model import GPT, GPTConfig, get_device, save_checkpoint
 
@@ -91,9 +92,14 @@ def train(step_count: int, model: GPT, tokenized_train_data: torch.Tensor, token
     return model
 
 def main():
+    parser = argparse.ArgumentParser(description="Train a GPT on tiny shakespeare.")
+    parser.add_argument("--tokenizer", choices=TOKENIZER_NAMES, default="char", help="which tokenizer to use")
+    parser.add_argument("--bpe-vocab-size", type=int, default=512, help="target vocab size when --tokenizer=bpe")
+    args = parser.parse_args()
+
     torch.manual_seed(TRAIN_SEED)  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
     train_data, validation_data = get_tiny_shakespeare_data()
-    tokenizer = CharEncoding()
+    tokenizer = make_tokenizer(args.tokenizer, args.bpe_vocab_size)
     tokenizer.train(train_data + validation_data)
     device = get_device()
     print(f"available device: {device}")
@@ -113,6 +119,7 @@ def main():
     name = timestamp()
     run = wandb.init(project="gpt-experiments", name=name, config={
         **asdict(config),
+        "tokenizer": args.tokenizer,
         "train_seed": TRAIN_SEED,
         "train_steps": TRAIN_STEPS,
         "batch_size": BATCH_SIZE,
@@ -124,7 +131,7 @@ def main():
 
     model = train(TRAIN_STEPS, model, tokenized_train_data, tokenized_val_data, run)
 
-    checkpoint_path = save_checkpoint(model, run_id)
+    checkpoint_path = save_checkpoint(model, run_id, args.tokenizer, args.bpe_vocab_size)
     print(f"saved checkpoint to {checkpoint_path}")
     run.finish()
     print(f"run_id={run_id}")

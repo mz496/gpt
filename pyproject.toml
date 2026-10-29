@@ -6,6 +6,7 @@ dependencies = [
     "ipykernel>=7.4.0",
     "jupyter>=1.1.1",
     "numpy>=2.5.4",
+    "regex>=2026.9.29",
     "torch>=2.14.1",
     "wandb>=0.31.0",
 ]

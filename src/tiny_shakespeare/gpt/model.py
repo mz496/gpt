@@ -346,19 +346,24 @@ class GPT(torch.nn.Module):
 def checkpoint_path(run_id: str) -> Path:
     return Path("checkpoints") / run_id / "model.pt"
 
-def save_checkpoint(model: GPT, run_id: str) -> Path:
+def save_checkpoint(model: GPT, run_id: str, tokenizer_name: str, bpe_vocab_size: int) -> Path:
     """
-    torch.save s the model's config and state_dict to checkpoints/<run_id>/model.pt and returns that path.
+    torch.save s the model's config, state_dict, and tokenizer settings to checkpoints/<run_id>/model.pt and returns that path.
     """
     path = checkpoint_path(run_id)
     path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save({"config": asdict(model.config), "state_dict": model.state_dict()}, path)
+    torch.save({
+        "config": asdict(model.config),
+        "state_dict": model.state_dict(),
+        "tokenizer": {"name": tokenizer_name, "bpe_vocab_size": bpe_vocab_size},
+    }, path)
     return path
 
-def load_checkpoint(run_id: str, device: str) -> GPT:
+def load_checkpoint(run_id: str, device: str) -> tuple[GPT, str, int]:
     """
     Reads the checkpoint written by save_checkpoint into a fresh model on `device`, in eval mode.
     The architecture comes from the config saved in the checkpoint.
+    Returns (model, tokenizer_name, bpe_vocab_size). Checkpoints from before tokenizers were saved are treated as "char".
     """
     path = checkpoint_path(run_id)
     if not path.is_file():
@@ -367,4 +372,5 @@ def load_checkpoint(run_id: str, device: str) -> GPT:
     model = GPT(GPTConfig(**saved["config"])).to(device)
     model.load_state_dict(saved["state_dict"])
     model.eval()
-    return model
+    tokenizer = saved.get("tokenizer", {"name": "char", "bpe_vocab_size": 0})
+    return model, tokenizer["name"], tokenizer["bpe_vocab_size"]
