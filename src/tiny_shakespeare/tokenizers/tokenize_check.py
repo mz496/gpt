@@ -5,7 +5,7 @@ from pathlib import Path
 
 from src.tiny_shakespeare.tokenizers.byte_pair_encoding import BytePairEncoding
 from src.tiny_shakespeare.tokenizers.utils import TOKENIZER_NAMES, make_tokenizer
-from src.tiny_shakespeare.utils import bytes_to_string
+from src.tiny_shakespeare.utils import bits_per_char, bytes_to_string
 
 INPUT_PATH = Path(__file__).parent.parent / "input_data" / "tiny_shakespeare.txt"
 
@@ -32,9 +32,10 @@ def main():
 
     # A model that ignores context and just predicts token frequencies plateaus at this loss.
     vocab_size = len(tokenizer.get_vocab())
-    print(f"vocab size {vocab_size}: uniform loss ln(V)={math.log(vocab_size):.3f}")
+    uniform = math.log(vocab_size)
+    print(f"vocab size {vocab_size}: uniform loss ln(V)={uniform:.3f} nats/token, {bits_per_char(uniform, len(tokens), len(text)):.3f} bits/char")
     entropy = unigram_entropy(tokens)
-    print(f"unigram entropy: {entropy:.3f} nats/token, {entropy * len(tokens) / len(text):.3f} nats/char")
+    print(f"unigram entropy: {entropy:.3f} nats/token, {entropy * len(tokens) / len(text):.3f} nats/char, {bits_per_char(entropy, len(tokens), len(text)):.3f} bits/char")
 
     if isinstance(tokenizer, BytePairEncoding):
         vocab = tokenizer.get_vocab()

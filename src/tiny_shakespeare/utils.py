@@ -19,6 +19,7 @@ generate with a (1, 1) zero tensor to get, say, 100 new chars in the time dimens
 now you have a (1, 100) tensor, decode it.
 """
 
+import math
 from datetime import datetime
 from pathlib import Path
 
@@ -48,3 +49,10 @@ def string_to_bytes(plain: str) -> list[int]:
 def bytes_to_string(byte_values: list[int]) -> str:
     """list of 0-255 ints -> plain, using UTF-8"""
     return bytes(byte_values).decode("utf-8", errors="replace")
+
+def bits_per_char(loss_nats_per_token: float, num_tokens: int, num_chars: int) -> float:
+    """
+    Converts a per-token cross-entropy loss (nats) to bits per character of the original text,
+    so that tokenizers with different vocab sizes can be compared.
+    """
+    return loss_nats_per_token * num_tokens / num_chars / math.log(2)
