@@ -5,7 +5,6 @@ from src.tiny_shakespeare.tokenizers.bpe_utils.bpe_utils import (
     Merge,
     apply_merges,
     build_vocab,
-    count_pairs,
     most_common_pair,
     replace_for_decode,
     replace_for_encode,
@@ -25,32 +24,32 @@ def test_replace_for_decode_inverts_encode() -> None:
     assert replace_for_decode(encoded, X, (1, 1)) == tokens
 
 
-def test_count_pairs_does_not_span_chunks() -> None:
-    counts = count_pairs([[1, 2], [2, 3]])
-    assert counts == {(1, 2): 1, (2, 3): 1}
-    assert (2, 2) not in counts
+def test_most_common_pair_does_not_span_chunks() -> None:
+    # Joined, [1, 2, 2, 3] would have the pair (2, 2); kept as separate chunks, every pair occurs once.
+    with pytest.raises(IllegalMergeError):
+        most_common_pair([[1, 2], [2, 3]])
 
 
-def test_count_pairs_sums_across_chunks() -> None:
-    assert count_pairs([[1, 2, 1, 2], [1, 2]])[(1, 2)] == 3
+def test_most_common_pair_sums_across_chunks() -> None:
+    assert most_common_pair([[3, 4, 5, 6], [1, 2], [1, 2], [1, 2], [5, 6]]) == (1, 2)
 
 
 def test_most_common_pair() -> None:
-    assert most_common_pair(count_pairs([[1, 2, 1, 2, 3, 4]])) == (1, 2)
+    assert most_common_pair([[1, 2, 1, 2, 3, 4]]) == (1, 2)
 
 
 def test_most_common_pair_ties_go_to_first_seen() -> None:
-    assert most_common_pair(count_pairs([[5, 6, 5, 6, 1, 2, 1, 2]])) == (5, 6)
+    assert most_common_pair([[5, 6, 5, 6, 1, 2, 1, 2]]) == (5, 6)
 
 
 def test_most_common_pair_halts_when_only_singletons() -> None:
     with pytest.raises(IllegalMergeError):
-        most_common_pair(count_pairs([[1, 2, 3]]))
+        most_common_pair([[1, 2, 3]])
 
 
 def test_most_common_pair_halts_when_empty() -> None:
     with pytest.raises(IllegalMergeError):
-        most_common_pair(count_pairs([[1], []]))
+        most_common_pair([[1], []])
 
 
 def test_apply_and_unapply_merges_roundtrip() -> None:

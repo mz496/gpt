@@ -15,7 +15,6 @@ from .bpe_utils.bpe_utils import (
     Merge,
     apply_merges,
     build_vocab,
-    count_pairs,
     most_common_pair,
     replace_for_encode,
     unapply_merges,
@@ -65,13 +64,24 @@ class BPETokenizer(Tokenizer):
         """Cached by train(). Note that before train() is called, it's just all raw bytes, unmerged."""
         return self._vocab
 
-    def train(self, s: str):
-        """Learns the merges based on the data frequencies."""
+    def train(self, s: str) -> None:
+        """
+        Learns the merges based on the data frequencies.
+
+        Each pass finds the best merge to do based on the highest pair frequency and records it.
+        e.g. aaabaa -> ZabZ (but using a token that's outside the vocab)
+
+        Inputs:
+        - s: the data string to train the tokenizer on
+        """
         tokens = string_to_bytes(s)
 
         for _ in range(self._num_merge_passes):
             try:
-                merge = self._merge(tokens)
+                if len(tokens) <= 2:
+                    raise IllegalMergeError("tokens must be length > 2")
+                from_tokens = most_common_pair([tokens])
+                merge = Merge(from_tokens, self._get_next_merged_token_counter())
                 # Record the merge, then apply it so we keep shrinking the string.
                 self.merges.append(merge)
                 tokens = replace_for_encode(tokens, merge.from_tokens, merge.to_token)
@@ -98,25 +108,6 @@ class BPETokenizer(Tokenizer):
         if len(self.merges) == 0:
             raise Exception("BPE has not been trained yet; call train() first")
         return apply_merges(string_to_bytes(s), self.merges)
-
-    def _merge(self, tokens: list[int]) -> Merge:
-        """
-        Find the best merge to do based on the highest pair frequency and return it.
-        aaabaa -> ZabZ (but using a token that's outside the vocab)
-        Pure.
-
-        Inputs:
-        - tokens: input tokens
-
-        Outputs:
-        - merge: the Merge that was done
-        """
-        if len(tokens) <= 2:
-            raise IllegalMergeError("tokens must be length > 2")
-        from_tokens = most_common_pair(count_pairs([tokens]))
-        to_token = self._get_next_merged_token_counter()
-
-        return Merge(from_tokens, to_token)
 
     def decode_as_string(self, tokens: list[int]) -> str:
         """

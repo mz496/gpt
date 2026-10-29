@@ -24,23 +24,17 @@ class IllegalMergeError(ValueError):
     """Raised when a merge can't be applied to the given tokens."""
 
 
-def count_pairs(chunks: Iterable[list[int]]) -> Counter[tuple[int, int]]:
+def most_common_pair(chunks: Iterable[list[int]]) -> tuple[int, int]:
     """
-    Counts adjacent token pairs within each chunk. Pairs never span two chunks.
+    Returns the most frequent adjacent token pair across the chunks; ties go to the pair seen first.
+    Pairs never span two chunks.
     Note we're slightly off in case of long runs like aaa - this counts 2 occurrences of aa, but we only can compress it once.
+    Raises IllegalMergeError if there is nothing worth merging (no pairs, or the best pair occurs only once).
     """
     counts: Counter[tuple[int, int]] = Counter()
     for tokens in chunks:
         # Align every token with its next token, dropping the last.
         counts.update(zip(tokens, tokens[1:]))
-    return counts
-
-
-def most_common_pair(counts: Counter[tuple[int, int]]) -> tuple[int, int]:
-    """
-    Returns the most frequent pair; ties go to the pair seen first.
-    Raises IllegalMergeError if there is nothing worth merging (no pairs, or the best pair occurs only once).
-    """
     if not counts:
         raise IllegalMergeError("no pairs to merge")
     pair, freq = counts.most_common(1)[0]
