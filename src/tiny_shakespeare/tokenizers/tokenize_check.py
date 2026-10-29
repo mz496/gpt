@@ -4,6 +4,7 @@ from collections import Counter
 from pathlib import Path
 
 from src.tiny_shakespeare.tokenizers.bpe_tokenizer import BPETokenizer
+from src.tiny_shakespeare.tokenizers.regex_bpe_tokenizer import RegexBPETokenizer
 from src.tiny_shakespeare.tokenizers.utils import TOKENIZER_NAMES, make_tokenizer
 from src.tiny_shakespeare.utils import bits_per_char, bytes_to_string
 
@@ -21,7 +22,7 @@ def unigram_entropy(tokens: list[int]) -> float:
 def main():
     parser = argparse.ArgumentParser(description="Train a tokenizer on tiny shakespeare and print stats about it.")
     parser.add_argument("--tokenizer", choices=TOKENIZER_NAMES, default="bpe", help="which tokenizer to check")
-    parser.add_argument("--bpe-vocab-size", type=int, default=512, help="target vocab size when --tokenizer=bpe")
+    parser.add_argument("--bpe-vocab-size", type=int, default=512, help="target vocab size when --tokenizer=bpe or regex_bpe")
     args = parser.parse_args()
 
     tokenizer = make_tokenizer(args.tokenizer, args.bpe_vocab_size)
@@ -37,7 +38,7 @@ def main():
     entropy = unigram_entropy(tokens)
     print(f"unigram entropy: {entropy:.3f} nats/token, {entropy * len(tokens) / len(text):.3f} nats/char, {bits_per_char(entropy, len(tokens), len(text)):.3f} bits/char")
 
-    if isinstance(tokenizer, BPETokenizer):
+    if isinstance(tokenizer, (BPETokenizer, RegexBPETokenizer)):
         vocab = tokenizer.get_vocab()
         print("merges (unrolled to bytes):")
         for merge in tokenizer.merges:

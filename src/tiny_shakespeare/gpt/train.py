@@ -78,7 +78,7 @@ def main():
     parser = argparse.ArgumentParser(description="Train a GPT on tiny shakespeare.")
     parser.add_argument("--config", choices=CONFIG_NAMES, default="default", help="which config in configs/ to use")
     parser.add_argument("--tokenizer", choices=TOKENIZER_NAMES, default="char", help="which tokenizer to use")
-    parser.add_argument("--bpe-vocab-size", type=int, default=512, help="target vocab size when --tokenizer=bpe")
+    parser.add_argument("--bpe-vocab-size", type=int, default=512, help="target vocab size when --tokenizer=bpe or regex_bpe")
     args = parser.parse_args()
     cfg = load_config(args.config)
 

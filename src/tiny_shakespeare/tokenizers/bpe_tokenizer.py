@@ -128,15 +128,6 @@ class BPETokenizer(Tokenizer):
             raise Exception("BPE has not been trained yet; call train() first")
         return bytes_to_string(unapply_merges(tokens, self.merges))
 
-    def save(self, path: Path):
-        # Saves state to the given path as JSON.
-        pass
-
-    @classmethod
-    def load(cls, path: Path):
-        # Loads state from the given path as JSON.
-        pass
-
     @override
     def __str__(self) -> str:
         return f"BPETokenizer<merges={self.merges}>"
