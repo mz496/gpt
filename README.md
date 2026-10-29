@@ -207,4 +207,9 @@ And wrut veme.
 - I implemented the GPT4-regex-then-BPE approach from the video, which prevents joins from occurring across regex splits, and plotted loss in bits-per-char.
 - I made the tokenizers always run on the train set only. Previously, I was running the tokenizer on train + validation, which was probably making bpc loss on the BPE tokenizer slightly optimistic. This isn't a problem for the char-level tokenizer since there's nothing in the validation set that's unrepresentable in the train charset.
 
-Runs I used:
+Some fixes, both of which make loss curves incomparable with earlier loss curves past this point:
+- Fixed a scaling factor that was too large ($d_\text{model}$ instead of $d_k$) in the self-attention computation
+- Reduced eval iters when estimating loss from 200 to 50. This took the compare tokenizers run using the default config from 11 minutes to 6.5 minutes. This makes the loss curve a bit noisier though.
+
+TODO: Graphs
+

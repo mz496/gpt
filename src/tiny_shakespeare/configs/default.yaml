@@ -3,7 +3,7 @@ train_steps: 1500
 train_seed: 1337
 batch_size: 32
 learning_rate: 1.0e-3
-eval_iters: 200
+eval_iters: 50
 
 # Model
 n_embd: 32
