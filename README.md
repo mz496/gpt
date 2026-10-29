@@ -154,3 +154,46 @@ When I tried this on a pure BPE vocab, I noticed that we plateau quickly then sl
 
 ![](assets/2026-10-28-bpe-512-raw-loss.png)
 
+I then normalized losses to bits per character, which as expected the plateaus are lower and longer for the higher vocabs:
+![](assets/2026-10-28-loss-bpc.png)
+
+This is BPE with a 2048-sized vocab; where as expected it has more fully formed words, but they're chopped up and spliced together in weirder ways, and there are obviously also unrepresentable chars that come out:
+
+```
+CLARENCEfilord, can all pro mance ; Corioliit to beseech an and your take thee in a beging: and RAKENBURYso am, L, to as ot asUCKINGHAMhis is of Roman's to and
+your voider against the Forceou,
+And hat, sea,
+You us ho'd subhatituRoman.
+
+wrnot glahe
+that we have at that commbers, of his down firve their serv:
+rus,
+And to them fme goLy, trusense ,
+TGod trafalLike y the So nows good conbeg thusanll lea;:
+well good comGloufuse one va'Ssterll. Who hifeer well Coriolanusmost For Mamber,
+Thbrother and to k minancelthere the:
+And atter; not jestst this had is thou a bege, Upngreat exterpe make my 'Tis naselths fa,
+�, King a will.
+
+First Murderers, my lord, and hims sto mandiow, the people Hear of the in the g their childate?
+```
+
+Whereas the char-level one just has more local word level structure:
+```
+And npvontim my aveid bonSe and sata s'dovin you,
+Lavel bit
+Thmpivecce pyope,
+Annis, gamims, marghepave 'se fase lelpes yoult in:
+Go the the piven as, pmatiren yoou veam.
+Thim,
+To dan:
+Clll noll thit habld, oo,
+Therat pa goo and thaime, my niss wlow the ald the the I dou thessch trame a you thitatos hou docke,of on whet the diple ow atilud sher! grray and go drt on rist for aid swou, har thew I the obliials thath youl, tof me Sethiwim.:
+Bunt E,
+Mundile en anclld:
+And sto to muse youe sotsild hake sorsid, benow ay ne,
+Mend farlis kee thangrs bug sore am lith cor ke ius
+What so thee ourzed, hiarveve. He and carutise sis bem at ckis hat:
+And mys ces a o of henor fonch sreaw, a
+And wrut veme.
+```
