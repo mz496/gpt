@@ -10,6 +10,7 @@ dependencies = [
     "regex>=2026.9.29",
     "torch>=2.14.1",
     "wandb>=0.31.0",
+    "wandb-workspaces>=0.4.13",
 ]
 
 [dependency-groups]
