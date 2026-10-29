@@ -19,5 +19,10 @@ class Tokenizer(ABC):
         """Tokens -> text."""
 
     @abstractmethod
-    def get_vocab_size(self) -> int:
-        """Number of distinct tokens."""
+    def get_vocab(self) -> dict[int, bytes]:
+        """
+        Maps every token id to the UTF-8 bytes it decodes to. Its length is the vocab size.
+
+        Callers (e.g. training loops) may call this often, so implementations must make it inexpensive:
+        build the vocab once in train() and return the cached result here. Callers must not mutate it.
+        """

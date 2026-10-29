@@ -99,7 +99,7 @@ def main():
     print(f"available device: {device}")
 
     config = GPTConfig(
-        vocab_size=tokenizer.get_vocab_size(),
+        vocab_size=len(tokenizer.get_vocab()),
         n_embd=N_EMBD,
         n_head=N_HEAD,
         n_layer=N_LAYER,

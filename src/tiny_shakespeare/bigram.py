@@ -127,7 +127,7 @@ class BigramModel(torch.nn.Module):
         return output
 
 def train(step_count: int, train_data: str, validation_data: str, tokenizer: Tokenizer, device: str) -> BigramModel:
-    model = BigramModel(tokenizer.get_vocab_size()).to(device)
+    model = BigramModel(len(tokenizer.get_vocab())).to(device)
     tokenized_train_data = torch.tensor(tokenizer.encode_string(train_data)).to(device)
     tokenized_val_data = torch.tensor(tokenizer.encode_string(validation_data)).to(device)
     # A reasonable lr for adam is 1e-3 to 1e-4.
@@ -141,7 +141,7 @@ def train(step_count: int, train_data: str, validation_data: str, tokenizer: Tok
         # expect logits shape [B, T, C]
         # An untrained model is near-uniform over C tokens, so loss should start near ~ln(C)
         if step % 100 == 0:
-            print(f"step={step:04d} loss={estimate_loss(model, tokenized_train_data, tokenized_val_data)} expected init ~{math.log(tokenizer.get_vocab_size()):.3f}")
+            print(f"step={step:04d} loss={estimate_loss(model, tokenized_train_data, tokenized_val_data)} expected init ~{math.log(len(tokenizer.get_vocab())):.3f}")
 
         # Write in gradients based on how bad this iteration was.
         loss.backward()

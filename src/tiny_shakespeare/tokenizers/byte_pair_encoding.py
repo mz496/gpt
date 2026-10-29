@@ -32,6 +32,9 @@ class BytePairEncoding(Tokenizer):
     Implements a simple byte-pair encoding tokenizer.
     Does passes over the input, merging the most commonly seen byte pairs.
     """
+    # Due to our UTF-8 encoding, the count of distinct tokens is 2**8 = 256.
+    # So if we use values to represent merged tokens, they should start at that range and up, so they won't ever conflict with known chars, and we can use them as embedding table indices later.
+    NUM_DISTINCT_TOKENS = 256
 
     def __init__(self, target_vocab_size: int):
         """
@@ -43,37 +46,33 @@ class BytePairEncoding(Tokenizer):
         # In decode, we convert this to a mapping.
         self.merges: list[Merge] = []
 
-        # Init the vocab: all distinct tokens. Due to our UTF-8 encoding, the count of distinct tokens is 2**8 = 256.
-        # So if we use values to represent merged tokens, they should start at that range and up, so they won't ever conflict with known chars, and we can use them as embedding table indices later.
-        num_distinct_tokens = 256
+        self._merged_token_counter: int = self.NUM_DISTINCT_TOKENS
 
-        self.merged_token_counter: int = num_distinct_tokens
+        self._vocab: dict[int, bytes] = self._build_vocab()
 
         # The vocab size increases by 1 every time we merge, so this puts an upper bound on the number of passes done.
-        if target_vocab_size <= num_distinct_tokens:
-            raise Exception(f"cannot set a target vocab size <= the number of distinct tokens in UTF-8 ({num_distinct_tokens})")
-        self.num_merge_passes = target_vocab_size - num_distinct_tokens
+        if target_vocab_size <= self.NUM_DISTINCT_TOKENS:
+            raise Exception(f"cannot set a target vocab size <= the number of distinct tokens in UTF-8 ({self.NUM_DISTINCT_TOKENS})")
+        self._num_merge_passes = target_vocab_size - self.NUM_DISTINCT_TOKENS
 
-    def get_next_merged_token_counter(self):
+    def _get_next_merged_token_counter(self):
         """
         Returns the next free merged-token-counter and then advances it for the next caller.
         """
-        next_counter = self.merged_token_counter
-        self.merged_token_counter += 1
+        next_counter = self._merged_token_counter
+        self._merged_token_counter += 1
         return next_counter
 
-    def get_vocab_size(self):
-        """
-        The vocab size is exactly the merge counter since it starts at the number of distinct tokens and increases for every merge.
-        """
-        return self.merged_token_counter
+    def get_vocab(self) -> dict[int, bytes]:
+        """Cached by train(). Note that before train() is called, it's just all raw bytes, unmerged."""
+        return self._vocab
 
-    def get_vocab(self) -> dict[int, tuple[int, ...]]:
+    def _build_vocab(self) -> dict[int, bytes]:
         """
         Maps every token id to the full sequence of bytes (0-255) it stands for.
-        Merges are unrolled in creation order, so e.g. 1,2 -> 257 and 257,1 -> 258 gives 258 -> (1, 2, 1).
+        Merges are unrolled in creation order, so e.g. 1,2 -> 257 and 257,1 -> 258 gives 258 -> bytes([1, 2, 1]).
         """
-        vocab: dict[int, tuple[int, ...]] = {i: (i,) for i in range(256)}
+        vocab: dict[int, bytes] = {i: bytes([i]) for i in range(self.NUM_DISTINCT_TOKENS)}
         for merge in self.merges:
             a, b = merge.from_tokens
             vocab[merge.to_token] = vocab[a] + vocab[b]
@@ -83,20 +82,22 @@ class BytePairEncoding(Tokenizer):
         """Learns the merges based on the data frequencies."""
         tokens = string_to_bytes(s)
 
-        for _ in range(self.num_merge_passes):
+        for _ in range(self._num_merge_passes):
             try:
-                merge = self.merge(tokens)
+                merge = self._merge(tokens)
                 # Record the merge, then apply it so we keep shrinking the string.
                 self.merges.append(merge)
-                tokens = self.replace_for_encode(tokens, merge.from_tokens, merge.to_token)
+                tokens = self._replace_for_encode(tokens, merge.from_tokens, merge.to_token)
             except IllegalMergeError as e:
                 print(f"merges halted: {e}")
                 break
 
-    def encode_string(self, s: str) -> list[int]:
-        return self.encode(string_to_bytes(s))
+        self._vocab = self._build_vocab()
 
-    def encode(self, tokens: list[int]) -> list[int]:
+    def encode_string(self, s: str) -> list[int]:
+        return self._encode(string_to_bytes(s))
+
+    def _encode(self, tokens: list[int]) -> list[int]:
         """
         Encode the string as a sequence of tokens.
 
@@ -114,10 +115,10 @@ class BytePairEncoding(Tokenizer):
             raise Exception("BPE has not been trained yet; call train() first")
         for merge in self.merges:
             # Do the substitution, going forward
-            tokens = self.replace_for_encode(tokens, merge.from_tokens, merge.to_token)
+            tokens = self._replace_for_encode(tokens, merge.from_tokens, merge.to_token)
         return tokens
 
-    def merge(self, tokens: list[int]) -> Merge:
+    def _merge(self, tokens: list[int]) -> Merge:
         """
         Find the best merge to do based on the highest pair frequency and return it.
         aaabaa -> ZabZ (but using a token that's outside the vocab)
@@ -140,11 +141,11 @@ class BytePairEncoding(Tokenizer):
         from_tokens, from_tokens_freq = counter_most_common
         if from_tokens_freq == 1:
             raise IllegalMergeError(f"no more merges possible, most common pair only occurs once: {counter_most_common}")
-        to_token = self.get_next_merged_token_counter()
+        to_token = self._get_next_merged_token_counter()
 
         return Merge(from_tokens, to_token)
         
-    def replace_for_encode(self, tokens: list[int], from_tokens: tuple[int, int], to_token: int) -> list[int]:
+    def _replace_for_encode(self, tokens: list[int], from_tokens: tuple[int, int], to_token: int) -> list[int]:
         """
         Replaces from_tokens with to_token, going forward only, thus replacing the first occurrence(s) of from_tokens with to_token.
         e.g. 1,1,1,1,1 where to_token is X becomes X,X,1.
@@ -162,9 +163,9 @@ class BytePairEncoding(Tokenizer):
         return out
     
     def decode_as_string(self, tokens: list[int]) -> str:
-        return bytes_to_string(self.decode(tokens))
+        return bytes_to_string(self._decode(tokens))
 
-    def decode(self, tokens: list[int]) -> list[int]:
+    def _decode(self, tokens: list[int]) -> list[int]:
         """
         Decodes the tokens using the state written during encode.
 
@@ -177,10 +178,13 @@ class BytePairEncoding(Tokenizer):
         if len(self.merges) == 0:
             raise Exception("BPE has not been trained yet; call train() first")
         for merge in reversed(self.merges):
-            tokens = self.replace_for_decode(tokens, merge.to_token, merge.from_tokens)
+            tokens = self._replace_for_decode(tokens, merge.to_token, merge.from_tokens)
         return tokens
 
-    def replace_for_decode(self, tokens: list[int], to_token: int, from_tokens: tuple[int, int]) -> list[int]:
+    def _replace_for_decode(self, tokens: list[int], to_token: int, from_tokens: tuple[int, int]) -> list[int]:
+        """
+        Replaces to_token with from_tokens, in reverse of _replace_for_encode.
+        """
         out: list[int] = []
         for t in tokens:
             if t == to_token:

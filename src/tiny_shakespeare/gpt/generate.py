@@ -23,8 +23,8 @@ def main():
     tokenizer = CharEncoding()
     tokenizer.train(train_data + validation_data)
     model = load_checkpoint(args.run_id, device)
-    if tokenizer.get_vocab_size() != model.config.vocab_size:
-        raise ValueError(f"vocab size {tokenizer.get_vocab_size()} does not match the checkpoint's {model.config.vocab_size}")
+    if len(tokenizer.get_vocab()) != model.config.vocab_size:
+        raise ValueError(f"vocab size {len(tokenizer.get_vocab())} does not match the checkpoint's {model.config.vocab_size}")
 
     torch.manual_seed(args.generate_seed)  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
     idx = torch.zeros((1, 1), dtype=torch.long).to(device)
