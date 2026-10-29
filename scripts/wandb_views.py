@@ -23,7 +23,10 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
 
 
 def resolve_entity(entity: str | None) -> str:
-    return entity or wandb.Api().default_entity
+    resolved = entity or wandb.Api().default_entity
+    if resolved is None:
+        raise ValueError("no wandb entity: pass --entity or log in to set a default")
+    return resolved
 
 
 def normalize_hex(color: str) -> str:

@@ -19,11 +19,14 @@ gpt-generate run_id *args:
 tokenize-check *args:
     uv run --locked -m src.tiny_shakespeare.tokenizers.tokenize_check {{args}}
 
-# Kicks off a few runs and plots on W&B
+# --- Comparison scripts ---
 compare-tokenizers *args:
     uv run --locked -m scripts.compare_tokenizers {{args}}
+compare-tokenizers-scaleup *args:
+    uv run --locked -m scripts.compare_tokenizers_scaleup {{args}}
 
 # --- W&B helpers ---
+
 wandb-create-view *args:
     @uv run --locked -m scripts.wandb_create_view {{args}}
 wandb-add-run-to-view run_id view_id *args:

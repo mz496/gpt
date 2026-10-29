@@ -6,7 +6,7 @@ import argparse
 
 import wandb
 
-from scripts.wandb_views import DEFAULT_PROJECT, add_common_args, add_run, load_view, resolve_entity
+from scripts.wandb_views import add_common_args, add_run, load_view, resolve_entity
 
 
 def main():

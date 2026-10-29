@@ -2,7 +2,7 @@
 A vibed script to compare char + BPE on diff vocab sizes + regex-then-BPE on diff vocab sizes, then collect everything into one W&B view.
 
 For every run it: trains with `just gpt-train`, renames the wandb run to "tokenizer=T | bpe_vocab_size=N",
-adds it to a new saved workspace view, and colors it (char = lime-600, bpe = teal 300..600, regex_bpe = blue 300..600,
+adds it to a new saved workspace view, and colors it (char = amber-600, bpe = lime 300..600, regex_bpe = indigo 300..600,
 with the shade rising with vocab size).
 
 Usage (from the repo root, with wandb logged in):
@@ -38,9 +38,9 @@ import wandb
 from scripts.wandb_views import DEFAULT_PROJECT, add_run, create_view, load_view, resolve_entity, set_run_color
 
 # Tailwind v3 hex values (without the #).
-LIME_600 = "65a30d"
-TEAL_300_TO_600 = ["5eead4", "2dd4bf", "14b8a6", "0d9488"]
-BLUE_300_TO_600 = ["93c5fd", "60a5fa", "3b82f6", "2563eb"]
+AMBER_600 = "d97706"
+LIME_300_TO_600 = ["bef264", "a3e635", "84cc16", "65a30d"]
+INDIGO_300_TO_600 = ["a5b4fc", "818cf8", "6366f1", "4f46e5"]
 
 
 @dataclass
@@ -59,9 +59,9 @@ def shade_for(index: int, count: int, shades: list[str]) -> str:
 
 
 def build_specs(sizes: list[int]) -> list[RunSpec]:
-    specs = [RunSpec("char", "char", None, LIME_600, "tokenizer=char")]
+    specs = [RunSpec("char", "char", None, AMBER_600, "tokenizer=char")]
     for i, size in enumerate(sizes):
-        for tokenizer, shades in [("bpe", TEAL_300_TO_600), ("regex_bpe", BLUE_300_TO_600)]:
+        for tokenizer, shades in [("bpe", LIME_300_TO_600), ("regex_bpe", INDIGO_300_TO_600)]:
             specs.append(RunSpec(
                 label=f"{tokenizer}_{size}",
                 tokenizer=tokenizer,
@@ -84,9 +84,11 @@ def log(message: str) -> None:
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {message}", flush=True)
 
 
-def train(spec: RunSpec, group: str, log_dir: Path) -> str:
+def train(spec: RunSpec, group: str, log_dir: Path, config: str | None = None) -> str:
     """Trains one run, writing its output to a log file. Returns the wandb run id. Raises if training fails."""
     command = ["just", "gpt-train", "--tokenizer", spec.tokenizer, "--group", group]
+    if config is not None:
+        command += ["--config", config]
     if spec.bpe_vocab_size is not None:
         command += ["--bpe-vocab-size", str(spec.bpe_vocab_size)]
     log_path = log_dir / f"{spec.label}.log"
@@ -103,31 +105,28 @@ def train(spec: RunSpec, group: str, log_dir: Path) -> str:
     return run_id
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Train and compare tokenizers, collected in one wandb view.")
-    parser.add_argument("--name", default="tokenizers-test")
-    parser.add_argument("--sizes", type=int, nargs="+", default=[300, 512, 1024, 2048])
-    parser.add_argument("--max-parallel", type=int, default=3, help="cap on trainings running at once")
-    parser.add_argument("--entity", default=None)
-    parser.add_argument("--project", default=DEFAULT_PROJECT)
-    parser.add_argument("--log-dir", type=Path, default=None)
-    args = parser.parse_args()
-
-    entity = resolve_entity(args.entity)
-    view_name = f"{datetime.now().strftime('%Y-%m-%dT%H:%M:%S')}_{args.name}"
-    view_id = create_view(entity, args.project, view_name)
-    log_dir = args.log_dir or Path(tempfile.mkdtemp())
+def run_comparison(
+    specs: list[RunSpec],
+    name: str,
+    entity: str,
+    project: str,
+    max_parallel: int,
+    log_dir: Path | None,
+    config: str | None = None,
+) -> None:
+    """Trains every spec (at most `max_parallel` at once), then adds them all, renamed and colored, to a new view. Exits 1 if any training failed."""
+    view_name = f"{datetime.now().strftime('%Y-%m-%dT%H:%M:%S')}_{name}"
+    view_id = create_view(entity, project, view_name)
+    log_dir = log_dir or Path(tempfile.mkdtemp())
     log_dir.mkdir(parents=True, exist_ok=True)
     log(f"view {view_id} ({view_name}); training logs in {log_dir}")
-
-    specs = build_specs(args.sizes)
 
     # Phase 1: train. The pool size is what caps the parallelism.
     run_ids: dict[str, str] = {}
     failures: list[str] = []
-    log(f"training {len(specs)} runs, at most {args.max_parallel} at a time")
-    with ThreadPoolExecutor(max_workers=args.max_parallel) as pool:
-        futures = {spec.label: pool.submit(train, spec, view_name, log_dir) for spec in specs}
+    log(f"training {len(specs)} runs, at most {max_parallel} at a time")
+    with ThreadPoolExecutor(max_workers=max_parallel) as pool:
+        futures = {spec.label: pool.submit(train, spec, view_name, log_dir, config) for spec in specs}
         for spec in specs:
             try:
                 run_ids[spec.label] = futures[spec.label].result()
@@ -139,14 +138,14 @@ def main():
     log("wandb: creating API client")
     api = wandb.Api()
     log(f"wandb: loading view {view_id}")
-    workspace = load_view(entity, args.project, view_id)
+    workspace = load_view(entity, project, view_id)
     log("wandb: view loaded")
     for spec in specs:
         run_id = run_ids.get(spec.label)
         if run_id is None:
             continue
         log(f"{spec.label}: fetching run {run_id}")
-        run = api.run(f"{entity}/{args.project}/{run_id}")
+        run = api.run(f"{entity}/{project}/{run_id}")
         log(f"{spec.label}: renaming to {spec.display_name!r}")
         run.name = spec.display_name
         run.update()
@@ -161,6 +160,19 @@ def main():
     if failures:
         print("failed (see logs):\n  " + "\n  ".join(failures))
         raise SystemExit(1)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Train and compare tokenizers, collected in one wandb view.")
+    parser.add_argument("--name", default="tokenizers-test")
+    parser.add_argument("--sizes", type=int, nargs="+", default=[300, 512, 1024, 2048])
+    parser.add_argument("--max-parallel", type=int, default=3, help="cap on trainings running at once")
+    parser.add_argument("--entity", default=None)
+    parser.add_argument("--project", default=DEFAULT_PROJECT)
+    parser.add_argument("--log-dir", type=Path, default=None)
+    args = parser.parse_args()
+
+    run_comparison(build_specs(args.sizes), args.name, resolve_entity(args.entity), args.project, args.max_parallel, args.log_dir)
 
 
 if __name__ == "__main__":

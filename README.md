@@ -208,6 +208,3 @@ And wrut veme.
 - I made the tokenizers always run on the train set only. Previously, I was running the tokenizer on train + validation, which was probably making bpc loss on the BPE tokenizer slightly optimistic. This isn't a problem for the char-level tokenizer since there's nothing in the validation set that's unrepresentable in the train charset.
 
 Runs I used:
-```
-TODO
-```
