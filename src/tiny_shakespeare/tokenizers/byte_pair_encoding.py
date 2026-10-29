@@ -10,6 +10,7 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..utils import bytes_to_string, string_to_bytes
 from .tokenizer import Tokenizer
 
 
@@ -80,7 +81,7 @@ class BytePairEncoding(Tokenizer):
 
     def train(self, s: str):
         """Learns the merges based on the data frequencies."""
-        tokens = self.string_to_bytes(s)
+        tokens = string_to_bytes(s)
 
         for _ in range(self.num_merge_passes):
             try:
@@ -92,17 +93,8 @@ class BytePairEncoding(Tokenizer):
                 print(f"merges halted: {e}")
                 break
 
-    def string_to_bytes(self, plain: str) -> list[int]:
-        """plain -> list of 0-255 ints"""
-        tokens = plain.encode("utf-8")
-        return list(map(int, tokens))
-
-    def bytes_to_string(self, byte_values: list[int]) -> str:
-        """list of 0-255 ints -> plain"""
-        return bytes(byte_values).decode("utf-8", errors="replace")
-
     def encode_string(self, s: str) -> list[int]:
-        return self.encode(self.string_to_bytes(s))
+        return self.encode(string_to_bytes(s))
 
     def encode(self, tokens: list[int]) -> list[int]:
         """
@@ -170,7 +162,7 @@ class BytePairEncoding(Tokenizer):
         return out
     
     def decode_as_string(self, tokens: list[int]) -> str:
-        return self.bytes_to_string(self.decode(tokens))
+        return bytes_to_string(self.decode(tokens))
 
     def decode(self, tokens: list[int]) -> list[int]:
         """

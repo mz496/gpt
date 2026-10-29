@@ -39,3 +39,12 @@ def get_tiny_shakespeare_data() -> tuple[str, str]:
 
 def timestamp() -> str:
     return datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+
+def string_to_bytes(plain: str) -> list[int]:
+    """plain -> list of 0-255 ints, using UTF-8"""
+    byte_values = plain.encode("utf-8")
+    return list(map(int, byte_values))
+
+def bytes_to_string(byte_values: list[int]) -> str:
+    """list of 0-255 ints -> plain, using UTF-8"""
+    return bytes(byte_values).decode("utf-8", errors="replace")
