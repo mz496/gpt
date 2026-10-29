@@ -161,7 +161,7 @@ When I tried this on a pure BPE vocab, I noticed that we plateau quickly then sl
 I then normalized losses to bits per character, which as expected the plateaus are lower and longer for the higher vocabs:
 ![](assets/2026-10-28-loss-bpc.png)
 
-This is BPE with a 2048-sized vocab; where as expected it has more fully formed words, but they're chopped up and spliced together in weirder ways, and there are obviously also unrepresentable chars that come out:
+This is BPE with a 2048-sized vocab for roughly bits-per-char loss 2.654; where as expected it has more fully formed words, but they're chopped up and spliced together in weirder ways, and there are obviously also unrepresentable chars that come out because of the full 256 bytes we started with:
 
 ```
 CLARENCEfilord, can all pro mance ; Corioliit to beseech an and your take thee in a beging: and RAKENBURYso am, L, to as ot asUCKINGHAMhis is of Roman's to and
@@ -182,7 +182,7 @@ And atter; not jestst this had is thou a bege, Upngreat exterpe make my 'Tis nas
 First Murderers, my lord, and hims sto mandiow, the people Hear of the in the g their childate?
 ```
 
-Whereas the char-level one just has more local word level structure:
+Whereas the char-level one just has more local word level structure for roughly bits-per-char loss 3.412:
 ```
 And npvontim my aveid bonSe and sata s'dovin you,
 Lavel bit
@@ -200,4 +200,14 @@ Mend farlis kee thangrs bug sore am lith cor ke ius
 What so thee ourzed, hiarveve. He and carutise sis bem at ckis hat:
 And mys ces a o of henor fonch sreaw, a
 And wrut veme.
+```
+
+### Oct 29
+
+- I implemented the GPT4-regex-then-BPE approach from the video, which prevents joins from occurring across regex splits, and plotted loss in bits-per-char.
+- I made the tokenizers always run on the train set only. Previously, I was running the tokenizer on train + validation, which was probably making bpc loss on the BPE tokenizer slightly optimistic. This isn't a problem for the char-level tokenizer since there's nothing in the validation set that's unrepresentable in the train charset.
+
+Runs I used:
+```
+TODO
 ```

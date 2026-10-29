@@ -79,6 +79,8 @@ def main():
     parser.add_argument("--config", choices=CONFIG_NAMES, default="default", help="which config in configs/ to use")
     parser.add_argument("--tokenizer", choices=TOKENIZER_NAMES, default="char", help="which tokenizer to use")
     parser.add_argument("--bpe-vocab-size", type=int, default=512, help="target vocab size when --tokenizer=bpe or regex_bpe")
+    parser.add_argument("--suffix", default=None, help="appended to the wandb run name (and checkpoint name), e.g. <timestamp>_abc123")
+    parser.add_argument("--group", default=None, help="wandb group; runs passing the same string are grouped together in the UI")
     args = parser.parse_args()
     cfg = load_config(args.config)
 
@@ -107,7 +109,9 @@ def main():
     tokenized_val_data = torch.tensor(tokenizer.encode_string(validation_data)).to(device)
 
     name = timestamp()
-    run = wandb.init(project="gpt-experiments", name=name, config={
+    if args.suffix:
+        name = f"{name}_{args.suffix}"
+    run = wandb.init(project="gpt-experiments", name=name, group=args.group, config={
         **asdict(config),
         "config_name": args.config,
         "tokenizer": args.tokenizer,
