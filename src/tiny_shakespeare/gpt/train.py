@@ -63,7 +63,7 @@ def train(cfg: TrainConfig, step_count: int, model: GPT, tokenized_train_data: t
         if step % 50 == 0 or step == step_count-1:
             losses = estimate_loss(cfg, model, tokenized_train_data, tokenized_val_data)
             print(f"step={step:04d} loss={losses}")
-            # Loss per token isn't comparable across tokenizers, so also log it per character of the original text.
+            # Loss per token isn't comparable across tokenizers, so also log it per character of the set we're computing loss over.
             val_bpc = bits_per_char(losses["validation"], len(tokenized_val_data), num_val_chars)
             run.log({"train/loss": losses["train"], "validation/loss": losses["validation"], "validation/loss_bpc": val_bpc}, step=step)
 

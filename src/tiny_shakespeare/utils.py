@@ -54,5 +54,7 @@ def bits_per_char(loss_nats_per_token: float, num_tokens: int, num_chars: int) -
     """
     Converts a per-token cross-entropy loss (nats) to bits per character of the original text,
     so that tokenizers with different vocab sizes can be compared.
+
+    nats/token * (1 bit / ln 2 nats) * (tokens in the eval text / chars in the eval text) = bits/char
     """
     return loss_nats_per_token * num_tokens / num_chars / math.log(2)
