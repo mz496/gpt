@@ -135,19 +135,21 @@ merges (unrolled to bytes):
   299: 115,116 ('st')
 ```
 
-I then bumped down the params back to pre-scale-up to get a good baseline on the char method on fewer iterations:
+#### What does changing the tokenizer do to the loss?
 
-- train_steps: 1500
-- batch_size: 32
-- block_size: 8
-- dropout: 0.2
-- learning_rate: 0.001
-- n_embd: 32
-- n_head: 4
-- n_layer: 3
-- tokenizer: char
-- vocab_size: 62
+I standardized:
+- train steps = 1500
+- config from before the scaleup that got the best result from Oct 27 into `default.yaml` and post-scaleup as `scaleup.yaml`
 
-Loss numbers:
-- `train:      2.233491897583008`
-- `validation: 2.3629558086395264`
+and ran this in a few different combinations, varying:
+- the tokenizer (`char`, `bpe`)
+- config (`default`, `scaleup`)
+- BPE vocab size
+
+When I tried this on a pure BPE vocab, I noticed that we plateau quickly then slowly taper off. For example on size 512,
+
+- We start out at full randomness across the vocab: $\ln(512)\approx6.238$
+- We then plateau at "unigram entropy" i.e. if we were strictly predicting the next char based on probability distribution of the vocab without context of past tokens: $\sum_{t\in T}p_t\ln(p_t)\approx5.345$, where $p_t$ is simply `(count of times token t appears in the text) / (vocab size)`.
+  - This holds up against other vocab sizes as well; this sum $\approx 4.264$ for a vocab size of 300.
+
+![](assets/2026-10-28-loss-curves-by-tokenizer.png)
