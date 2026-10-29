@@ -7,6 +7,7 @@ From Karpathy's "Let's build the GPT Tokenizer", ~27:46
 """
 
 from pathlib import Path
+from typing import override
 
 from ..utils import bytes_to_string, string_to_bytes
 from .bpe_utils.bpe_utils import (
@@ -60,10 +61,12 @@ class BPETokenizer(Tokenizer):
         self._merged_token_counter += 1
         return next_counter
 
+    @override
     def get_vocab(self) -> dict[int, bytes]:
         """Cached by train(). Note that before train() is called, it's just all raw bytes, unmerged."""
         return self._vocab
 
+    @override
     def train(self, s: str) -> None:
         """
         Learns the merges based on the data frequencies.
@@ -91,6 +94,7 @@ class BPETokenizer(Tokenizer):
 
         self._vocab = build_vocab(self.merges)
 
+    @override
     def encode_string(self, s: str) -> list[int]:
         """
         Encode the string as a sequence of tokens.
@@ -109,6 +113,7 @@ class BPETokenizer(Tokenizer):
             raise Exception("BPE has not been trained yet; call train() first")
         return apply_merges(string_to_bytes(s), self.merges)
 
+    @override
     def decode_as_string(self, tokens: list[int]) -> str:
         """
         Decodes the tokens using the state written during encode.
@@ -132,5 +137,6 @@ class BPETokenizer(Tokenizer):
         # Loads state from the given path as JSON.
         pass
 
+    @override
     def __str__(self) -> str:
         return f"BPETokenizer<merges={self.merges}>"
