@@ -22,12 +22,12 @@ from .bpe_utils.bpe_utils import (
 )
 from .tokenizer import Tokenizer
 
-__all__ = ["BytePairEncoding", "IllegalMergeError", "Merge"]
+__all__ = ["BPETokenizer", "IllegalMergeError", "Merge"]
 
 # 1:40pm
 
 
-class BytePairEncoding(Tokenizer):
+class BPETokenizer(Tokenizer):
     """
     Implements a simple byte-pair encoding tokenizer.
     Does passes over the input, merging the most commonly seen byte pairs.
@@ -82,9 +82,6 @@ class BytePairEncoding(Tokenizer):
         self._vocab = build_vocab(self.merges)
 
     def encode_string(self, s: str) -> list[int]:
-        return self._encode(string_to_bytes(s))
-
-    def _encode(self, tokens: list[int]) -> list[int]:
         """
         Encode the string as a sequence of tokens.
 
@@ -100,7 +97,7 @@ class BytePairEncoding(Tokenizer):
         """
         if len(self.merges) == 0:
             raise Exception("BPE has not been trained yet; call train() first")
-        return apply_merges(tokens, self.merges)
+        return apply_merges(string_to_bytes(s), self.merges)
 
     def _merge(self, tokens: list[int]) -> Merge:
         """
@@ -122,9 +119,6 @@ class BytePairEncoding(Tokenizer):
         return Merge(from_tokens, to_token)
 
     def decode_as_string(self, tokens: list[int]) -> str:
-        return bytes_to_string(self._decode(tokens))
-
-    def _decode(self, tokens: list[int]) -> list[int]:
         """
         Decodes the tokens using the state written during encode.
 
@@ -136,7 +130,7 @@ class BytePairEncoding(Tokenizer):
         """
         if len(self.merges) == 0:
             raise Exception("BPE has not been trained yet; call train() first")
-        return unapply_merges(tokens, self.merges)
+        return bytes_to_string(unapply_merges(tokens, self.merges))
 
     def save(self, path: Path):
         # Saves state to the given path as JSON.
@@ -148,4 +142,4 @@ class BytePairEncoding(Tokenizer):
         pass
 
     def __str__(self) -> str:
-        return f"BytePairEncoding<merges={self.merges}>"
+        return f"BPETokenizer<merges={self.merges}>"

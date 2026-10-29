@@ -1,7 +1,7 @@
 from .tokenizer import Tokenizer
 
 
-class CharEncoding(Tokenizer):
+class CharTokenizer(Tokenizer):
     """
     Tokenizes by character: the vocab is the sorted set of distinct characters seen in train.
     """

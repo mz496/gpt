@@ -2,7 +2,7 @@ import math
 import torch
 from torch.nn import functional as F
 
-from .tokenizers.char_encoding import CharEncoding
+from .tokenizers.char_tokenizer import CharTokenizer
 from .tokenizers.tokenizer import Tokenizer
 from .utils import get_tiny_shakespeare_data
 
@@ -153,7 +153,7 @@ def train(step_count: int, train_data: str, validation_data: str, tokenizer: Tok
 def main():
     torch.manual_seed(1337)  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
     train_data, validation_data = get_tiny_shakespeare_data()
-    tokenizer = CharEncoding()
+    tokenizer = CharTokenizer()
     tokenizer.train(train_data + validation_data)
     device = get_device()
     print(f"available device: {device}")
