@@ -152,4 +152,5 @@ When I tried this on a pure BPE vocab, I noticed that we plateau quickly then sl
 - We then plateau at "unigram entropy" i.e. if we were strictly predicting the next char based on probability distribution of the vocab without context of past tokens: $\sum_{t\in T}p_t\ln(p_t)\approx5.345$, where $p_t$ is simply `(count of times token t appears in the text) / (vocab size)`.
   - This holds up against other vocab sizes as well; this sum $\approx 4.264$ for a vocab size of 300.
 
-![](assets/2026-10-28-loss-curves-by-tokenizer.png)
+![](assets/2026-10-28-bpe-512-raw-loss.png)
+
