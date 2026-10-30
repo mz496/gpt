@@ -222,6 +222,33 @@ I ran a script comparing the char tokenizer, the BPE tokenizer on vocab sizes {3
 
 ![](assets/2026-10-29-loss-on-tokenizers.png)
 
+#### Understanding the tokenizers
+
+Of the 265406 chars, checked some stats on the tokenizers to understand their effectiveness.
+
+For example, if increasing the vocab size significantly did not improve chars/token, that would help with setting an optimal value.
+
+Char-based: chars/token = 1
+
+BPE:
+
+| | 300 | 512 | 1024 | 2048 |
+| --- | --- | --- | --- | --- |
+| Chars/token | x | x | x | x |
+
+Regex-then-BPE:
+
+| | 300 | 512 | 1024 | 2048 |
+| --- | --- | --- | --- | --- |
+| Chars/token | x | x | x | x |
+
 #### Scaling up again
 
-TODO
+Overfitted: (Note that the train loss is not in bpc so they're not directly comparable, but the divergence where train keeps ticking down and val goes back up looks pretty clearly bad)
+
+![](assets/2026-10-29-overfit.png)
+
+TODOs:
+- Spent 1574s training char, 2250s training regex_bpe. Speed up the loop by parallelizing heads
+- Increase data?
+- Do the data plot on x%
