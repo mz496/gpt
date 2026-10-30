@@ -43,7 +43,7 @@ def build_specs() -> list[RunSpec]:
 def main():
     parser = argparse.ArgumentParser(description=f"Compare char vs regex_bpe-{BPE_VOCAB_SIZE} on the {CONFIG} config.")
     parser.add_argument("--name", default="tokenizers-scaleup")
-    parser.add_argument("--max-parallel", type=int, default=2, help="cap on trainings running at once")
+    parser.add_argument("--max-parallel", type=int, default=1, help="cap on trainings running at once")
     parser.add_argument("--entity", default=None)
     parser.add_argument("--project", default=DEFAULT_PROJECT)
     parser.add_argument("--log-dir", type=Path, default=None)
