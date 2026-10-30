@@ -13,7 +13,7 @@ Following Karpathy's https://karpathy.ai/zero-to-hero.html -> Let's build GPT
 
 ### Oct 20-27
 
-**Implemented the decoder-only transformer and some optimizations to get validation loss low enough so that the output somewhat looks like prose**
+**Implemented the decoder-only transformer and some optimizations to get validation loss low enough so that the output somewhat looks like prose.**
 
 Recording loss numbers as I walk through the tutorial:
 
@@ -87,6 +87,8 @@ Whose inpect
 
 ### Oct 28
 
+**Got curious about tokenization and followed Karpathy's tokenization video. Then asked: Could we improve loss simply by improving tokenization and keeping everything else fixed?**
+
 Implemented the byte-pair encoding tokenizer, and refactored the char-based tokenizer behind a `tokenizer.py` interface.
 
 The result of BPE on the tiny shakespeare data with a target vocab size of 300, this looks reasonable so far:
@@ -158,7 +160,7 @@ When I tried this on a pure BPE vocab, I noticed that we plateau quickly then sl
 
 ![](assets/2026-10-28-bpe-512-raw-loss.png)
 
-I then normalized losses to bits per character, which as expected the plateaus are lower and longer for the higher vocabs:
+I then normalized losses to bits per character, since each tokenization method results in a different-sized vocab and tokenized text. As expected, the unigram-loss plateaus are lower and longer for the higher vocabs:
 ![](assets/2026-10-28-loss-bpc.png)
 
 This is BPE with a 2048-sized vocab for roughly bits-per-char loss 2.654; where as expected it has more fully formed words, but they're chopped up and spliced together in weirder ways, and there are obviously also unrepresentable chars that come out because of the full 256 bytes we started with:
@@ -204,12 +206,22 @@ And wrut veme.
 
 ### Oct 29
 
+**Can we improve loss just by improving tokenization? Yes! Now what happens when we scale up again on the best tokenization method found?**
+
 - I implemented the GPT4-regex-then-BPE approach from the video, which prevents joins from occurring across regex splits, and plotted loss in bits-per-char.
 - I made the tokenizers always run on the train set only. Previously, I was running the tokenizer on train + validation, which was probably making bpc loss on the BPE tokenizer slightly optimistic. This isn't a problem for the char-level tokenizer since there's nothing in the validation set that's unrepresentable in the train charset.
 
 Some fixes, both of which make loss curves incomparable with earlier loss curves past this point:
 - Fixed a scaling factor that was too large ($d_\text{model}$ instead of $d_k$) in the self-attention computation
-- Reduced eval iters when estimating loss from 200 to 50. This took the compare tokenizers run using the default config from 11 minutes to 6.5 minutes. This makes the loss curve a bit noisier though.
+- Reduced eval iters when estimating loss from 200 to 50. This took the compare tokenizers run using the default config from 11 minutes to 6.5 minutes. This makes the loss curve a bit noisier though. For example, the regex_bpe 2048 curve stays cleanly below the regex_bpe 1024 curve when the eval_iters was 200, but barely exceeds it when I reduced it, likely due to this noise.
 
-TODO: Graphs
+#### Comparing tokenizers on the default config
 
+I ran a script comparing the char tokenizer, the BPE tokenizer on vocab sizes {300, 512, 1024, 2048}, and the regex-then-BPE tokenizer on vocab sizes {300, 512, 1024, 2048}, all using [default.yaml config at 34a5b38](TODO claude link to default.yaml) and observed that regex-then-BPE on 2048 was best.
+- With the plain BPE tokenizer, I noticed that actually we overfit/overwhelm the model such that it trains *slower* on a 2048-vocab than a 1024 vocab. (this is the darkest green line remaining above the 3rd-darkest green line from iteration ~1100 to the end graphed)
+
+![](assets/2026-10-29-loss-on-tokenizers.png)
+
+#### Scaling up again
+
+TODO
