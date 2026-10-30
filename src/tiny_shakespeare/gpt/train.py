@@ -9,9 +9,12 @@ from ..tokenizers.utils import TOKENIZER_NAMES, make_tokenizer
 from ..utils import bits_per_char, get_tiny_shakespeare_data, timestamp
 from .model import GPT, GPTConfig, get_device, save_checkpoint
 
-def get_batch(tokenized: torch.Tensor, batch_size: int, block_size: int) -> tuple[torch.Tensor, torch.Tensor]:
+def get_batch(tokenized: torch.Tensor, batch_size: int, block_size: int, generator: torch.Generator | None = None) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Pull `batch_size` windows of length `block_size` starting at random points in `tokenized`.
+
+    `generator` pins the choice of window starts. Without one we draw from torch's global RNG, which is shared with weight init and dropout,
+    so the batches would depend on how much randomness the model itself happened to consume.
 
     Returns two tensors (contexts, targets) of size [B, T]
     - B = batch_size
@@ -26,7 +29,7 @@ def get_batch(tokenized: torch.Tensor, batch_size: int, block_size: int) -> tupl
     """
     # [B] random numbers drawn from [0, n-block_size)
     # Do we need to prevent wraparound here...?
-    starts = torch.randint(0, len(tokenized) - block_size, (batch_size,))
+    starts = torch.randint(0, len(tokenized) - block_size, (batch_size,), generator=generator)
     x = torch.stack([tokenized[i:i+block_size] for i in starts])
     y = torch.stack([tokenized[i+1:i+block_size+1] for i in starts])
     return x, y
@@ -35,14 +38,18 @@ def get_batch(tokenized: torch.Tensor, batch_size: int, block_size: int) -> tupl
 def estimate_loss(cfg: TrainConfig, model: torch.nn.Module, tokenized_train_data: torch.Tensor, tokenized_val_data: torch.Tensor) -> dict[str, float]:
     """
     Estimate loss over train, validation based on cfg.eval_iters batches.
+
+    The batches are the same every call (and for every model): each dataset gets a fresh generator seeded with cfg.eval_seed.
+    This makes estimates comparable across steps and across model implementations, and independent of dropout/init randomness.
     """
     model.eval()
     result: dict[str, float] = {}
     for dataset_type, data in [("train", tokenized_train_data), ("validation", tokenized_val_data)]:
+        generator = torch.Generator().manual_seed(cfg.eval_seed)
         # Compute the mean per dataset type.
         losses = torch.zeros(cfg.eval_iters)
         for k in range(cfg.eval_iters):
-            contexts, targets = get_batch(data, cfg.batch_size, cfg.block_size)
+            contexts, targets = get_batch(data, cfg.batch_size, cfg.block_size, generator)
             _logits, loss = model(contexts, targets)
             losses[k] = loss
         result[dataset_type] = losses.mean().item()
@@ -52,11 +59,13 @@ def estimate_loss(cfg: TrainConfig, model: torch.nn.Module, tokenized_train_data
 def train(cfg: TrainConfig, step_count: int, model: GPT, tokenized_train_data: torch.Tensor, tokenized_val_data: torch.Tensor, num_train_chars: int, num_val_chars: int, run: wandb.Run) -> GPT:
     # A reasonable lr for adam is 1e-3 to 1e-4.
     optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.learning_rate)
+    # Own generator for training batches, so the order of training data doesn't depend on how much randomness dropout consumes.
+    train_generator = torch.Generator().manual_seed(cfg.train_seed)
     for step in range(step_count):
         # Zero out gradients for this iteration.
         model.zero_grad()
 
-        contexts, targets = get_batch(tokenized_train_data, batch_size=cfg.batch_size, block_size=cfg.block_size)
+        contexts, targets = get_batch(tokenized_train_data, batch_size=cfg.batch_size, block_size=cfg.block_size, generator=train_generator)
         _logits, loss = model(contexts, targets)
         # expect logits shape [B, T, C]
         # An untrained model is near-uniform over C tokens, so loss should start near ~ln(C)

@@ -11,7 +11,10 @@ CONFIG_NAMES = sorted(p.stem for p in CONFIG_DIR.glob("*.yaml"))
 class TrainConfig:
     # Training
     train_steps: int
+    # Seeds weight init and dropout (global RNG), and the generator that picks training batches.
     train_seed: int
+    # Seeds the generator that picks the (fixed) batches used for loss estimation.
+    eval_seed: int
     # how many independent sequences will we look at in parallel?
     batch_size: int
     learning_rate: float

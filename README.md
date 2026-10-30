@@ -217,7 +217,7 @@ Some fixes, both of which make loss curves incomparable with earlier loss curves
 
 #### Comparing tokenizers on the default config
 
-I ran a script comparing the char tokenizer, the BPE tokenizer on vocab sizes {300, 512, 1024, 2048}, and the regex-then-BPE tokenizer on vocab sizes {300, 512, 1024, 2048}, all using [default.yaml config at 34a5b38](TODO claude link to default.yaml) and observed that regex-then-BPE on 2048 was best.
+I ran a script comparing the char tokenizer, the BPE tokenizer on vocab sizes {300, 512, 1024, 2048}, and the regex-then-BPE tokenizer on vocab sizes {300, 512, 1024, 2048}, all using [default.yaml config at 34a5b38](https://github.com/mz496/gpt/blob/34a5b38dd375aa90183ac7c2ff814e1e3aec7e83/src/tiny_shakespeare/configs/default.yaml) and observed that regex-then-BPE on 2048 was best.
 - With the plain BPE tokenizer, I noticed that actually we overfit/overwhelm the model such that it trains *slower* on a 2048-vocab than a 1024 vocab. (this is the darkest green line remaining above the 3rd-darkest green line from iteration ~1100 to the end graphed)
 
 ![](assets/2026-10-29-loss-on-tokenizers.png)
@@ -248,7 +248,8 @@ Overfitted: (Note that the train loss is not in bpc so they're not directly comp
 
 ![](assets/2026-10-29-overfit.png)
 
+I sped up the training a bit by implementing the heads as a new dimension, which took a `just gpt-train --tokenizer char` run from ~59s to ~37s.
+
 TODOs:
-- Spent 1574s training char, 2250s training regex_bpe. Speed up the loop by parallelizing heads
 - Increase data?
-- Do the data plot on x%
+- Do the data plot: best validation bpc vs. data size (log) for each tokenizer, to see how much having more data helps
