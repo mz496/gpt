@@ -174,6 +174,148 @@ class Head(torch.nn.Module):
         out = wei @ v
         return out
 
+def scaled_dot_product_attention(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    attn_mask: torch.Tensor,
+    dropout_p: float,
+) -> torch.Tensor:
+    """
+    Scaled dot-product attention, agnostic to other dimensions (which we use to do attention on multiple heads at once)
+
+    Basically a reimplementation of https://docs.pytorch.org/docs/2.15/generated/torch.nn.functional.scaled_dot_product_attention.html
+
+    Inputs:
+    - q: [... T_q, hs] in
+    - k: [... T_k, hs] in
+    - v: [... T_k, hs] in
+    - attn_mask: [T_q, T_k] of 0/1 where 1 means "participates in attention" and 0 means "does not participate"
+    Output:
+    [..., T_q, hs]
+
+    TODO: Can also unwind this and optimize it by not operating on the last 2 dims like the stateless helper and always working in the correct shape,
+    since this forces a reshape later as is.
+    """
+    d_k = k.shape[-1] # head size, ie dimensions in k.
+    
+    # [..., T_q, hs] * [..., hs, T_k] = [..., T_q, T_k]
+    wei = q @ k.transpose(-2, -1) * (d_k ** -0.5)
+    # Mask broadcast from [T_q, T_k] to [..., T_q, T_k] (matching wei)
+    wei = wei.masked_fill(attn_mask == 0, float("-inf"))
+    # Softmax per-row, ie the final dimension.
+    wei = F.softmax(wei, dim=-1)
+
+    wei = F.dropout(wei, p=dropout_p)
+
+    # [..., T_q, T_k] * [..., T_k, hs] = [..., T_q, hs]
+    out = wei @ v
+    return out
+
+class MultiHeadAttentionParallelHeads(torch.nn.Module):
+    """
+    Before, each head was running in series, which is conceptually simpler but slower.
+    This is because the heads can run in parallel as they don't interact until we concat at the very end.
+
+    MultiHeadAttention (before)
+    in:  [B, T, C]
+    ├─ Head × H (in series)    each: [B, T, C] -> [B, T, hs]
+    ├─ cat(dim=-1)                   [B, T, H*hs]
+    ├─ proj                          [B, T, C]
+    └─ dropout                       [B, T, C]
+    out: [B, T, C]
+
+    MultiHeadAttentionParallelHeads (after, unfused)
+    in:  [B, T, C]
+    ├─ query proj   [B, T, C] -> q: [B, T, H*hs]
+    ├─ key proj     [B, T, C] -> k: [B, T, H*hs]
+    ├─ value proj   [B, T, C] -> v: [B, T, H*hs]
+    ├─ split heads  (each of q, k, v)
+    │               [B, T, H*hs] -> [B, H, T, hs]
+    ├─ attention (per head)
+    │               [B, H, T, hs] -> [B, H, T, hs]
+    │    internal scores: [B, H, T, T]
+    ├─ merge heads  [B, H, T, hs] -> [B, T, H*hs]
+    ├─ proj         [B, T, H*hs] -> [B, T, C]
+    └─ dropout      [B, T, C]
+    out: [B, T, C]
+
+    C = n_embd, H = n_head
+    """
+
+    tril: torch.Tensor
+
+    def __init__(self, config: GPTConfig, num_heads: int, head_size: int):
+        super().__init__()
+        self.num_heads = num_heads
+        self.head_size = head_size
+        self.dropout_p = config.dropout # For the attention-internal dropout
+
+        # All heads along the out-dimension layer at once
+        self.query = torch.nn.Linear(config.n_embd, num_heads * head_size, bias=False)
+        self.key = torch.nn.Linear(config.n_embd, num_heads * head_size, bias=False)
+        self.value = torch.nn.Linear(config.n_embd, num_heads * head_size, bias=False)
+
+        self.proj = torch.nn.Linear(num_heads * head_size, config.n_embd)
+        self.dropout = torch.nn.Dropout(config.dropout)
+        self.register_buffer("tril", torch.tril(torch.ones(config.block_size, config.block_size)))
+
+    def forward(self, x: torch.Tensor):
+        # [B, T, C] -> [B, T, H*hs]
+        q: torch.Tensor = self.query(x)
+        k: torch.Tensor = self.key(x)
+        v: torch.Tensor = self.value(x)
+        # NOTE: We separate out when we actually mean T_q vs T_k for potential later work when T_q != T_k such as KV caching, despite the fact that T_q = T_k = T right now
+        H = self.num_heads
+        hs = self.head_size
+        B, T_q, _ = q.shape
+        _, T_k, _ = k.shape
+
+        # Reshape q, k, v for attention (namely we want the time dimension at -2, and head size dimension at -1)
+        # [B, T, H*hs] -> [B, T, H, hs] -> [B, H, T, hs]
+        q = q.view(B, T_q, H, hs).transpose(1, 2)
+        k = k.view(B, T_k, H, hs).transpose(1, 2)
+        v = v.view(B, T_k, H, hs).transpose(1, 2)
+
+        T_q = q.shape[-2] # "L" in pytorch - the target sequence length. Recall Q is "what am I looking for"
+        T_k = k.shape[-2] # "S" in pytorch - the source sequence length. Recall K is "what do I contain"
+        # This avoids tokens from being influenced by future tokens when we compute the output.
+        #
+        # This later gives the weights [..., T_q, T_k] 1-summing rows where row i has i+1 nonzero vals
+        # [1.0, 0.0, ...,          0.0]
+        # [0.3, 0.7, 0.0, ...      0.0]
+        # [0.2, 0.5, 0.3, 0.0, ... 0.0]
+        # ...
+        # wei row i, col j: "how much did Q,K overlap re: 'what token i is looking for' with 'what token j has'"
+        # 
+        # Then multiplying by wei @ v gives:
+        # For time t, a head_size-dimensional representation that represents a mixture of all of [:t+1]'s v vectors.
+        # e.g. out[2] = 0.2*v[0] + 0.5*v[1] + 0.3*v[2]
+        # This is how we get all of the prefixes [0:i] for i=1..T+1 at once.
+        attn_mask = self.tril[:T_q, :T_k]
+
+        # [B, H, T (really T_q), hs]
+        attention_heads: torch.Tensor = scaled_dot_product_attention(q, k, v, attn_mask, self.dropout_p if self.training else 0)
+
+        # Reshape back
+        # [B, H, T, hs] -> [B, T, H, hs] -> [B, T, H*hs]
+        # Note: reshape almost always copies here, because the transpose means the strides go from
+        # - from (H*T_q*hs, T_q*hs, hs, 1) (contiguous)
+        # - to   (H*T_q*hs, hs, T_q*hs, 1) (no longer contiguous)
+        # and no copy is necessary when merging dims a, b and stride_a == size_b * stride_b
+        # thus stride_H == size_hs * stride_hs
+        #        T_q*hs == hs      * 1
+        # i.e. only when T_q == 1.
+        # But in practice the inefficiency of the body of scaled_dot_product_attention (allocating a new tensor basically on every line) is more important
+        attention_heads = attention_heads.transpose(1, 2).reshape(B, T_q, H*hs)
+
+        # [B, T, H*hs] -> [B, T, C]
+        out = self.proj(attention_heads)
+
+        out = self.dropout(out)
+
+        return out
+
 class MultiHeadAttention(torch.nn.Module):
     """
     Multiple heads of self-attention running in parallel, concatenated together along the channel dimension.
@@ -218,7 +360,10 @@ class Block(torch.nn.Module):
         # Masked Multi-Head Attention
         # The intuition is that we are letting attention run in this dimensional space
         # With multi-head self-attention we subdivide into several smaller-dimensional spaces.
-        self.sa_heads = MultiHeadAttention(config, num_heads=config.n_head, head_size=config.n_embd // config.n_head)
+        # -- Sequential version kept for posterity/learning
+        # self.sa_heads = MultiHeadAttention(config, num_heads=config.n_head, head_size=config.n_embd // config.n_head)
+        # -- Batched version:
+        self.sa_heads = MultiHeadAttentionParallelHeads(config, num_heads=config.n_head, head_size=config.n_embd // config.n_head)
 
         # Feed Forward
         # Note that these embedding dimensions are independently looking at one another, after the self-attention has done the cross-communication.
