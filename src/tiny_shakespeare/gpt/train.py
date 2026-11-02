@@ -35,22 +35,33 @@ def get_batch(tokenized: torch.Tensor, batch_size: int, block_size: int, generat
     y = torch.stack([tokenized[i+1:i+block_size+1] for i in starts])
     return x, y
 
-@torch.no_grad
-def estimate_loss(cfg: TrainConfig, model: torch.nn.Module, tokenized_train_data: torch.Tensor, tokenized_val_data: torch.Tensor) -> dict[str, float]:
-    """
-    Estimate loss over train, validation based on cfg.eval_iters batches.
+EvalBatches = dict[str, list[tuple[torch.Tensor, torch.Tensor]]]
 
-    The batches are the same every call (and for every model): each dataset gets a fresh generator seeded with cfg.eval_seed.
+def make_eval_batches(cfg: TrainConfig, tokenized_train_data: torch.Tensor, tokenized_val_data: torch.Tensor) -> EvalBatches:
+    """
+    Build the cfg.eval_iters (contexts, targets) batches used for loss estimation, per dataset.
+
+    The batches are the same for every estimate (and for every model): each dataset gets a fresh generator seeded with cfg.eval_seed.
     This makes estimates comparable across steps and across model implementations, and independent of dropout/init randomness.
+    Since they never change, we build them once up front instead of on every estimate.
+    """
+    result: EvalBatches = {}
+    for dataset_type, data in [("train", tokenized_train_data), ("validation", tokenized_val_data)]:
+        generator = torch.Generator().manual_seed(cfg.eval_seed)
+        result[dataset_type] = [get_batch(data, cfg.batch_size, cfg.block_size, generator) for _ in range(cfg.eval_iters)]
+    return result
+
+@torch.no_grad
+def estimate_loss(model: torch.nn.Module, eval_batches: EvalBatches) -> dict[str, float]:
+    """
+    Estimate loss over train, validation as the mean loss over the fixed batches from make_eval_batches.
     """
     model.eval()
     result: dict[str, float] = {}
-    for dataset_type, data in [("train", tokenized_train_data), ("validation", tokenized_val_data)]:
-        generator = torch.Generator().manual_seed(cfg.eval_seed)
+    for dataset_type, batches in eval_batches.items():
         # Compute the mean per dataset type.
-        losses = torch.zeros(cfg.eval_iters)
-        for k in range(cfg.eval_iters):
-            contexts, targets = get_batch(data, cfg.batch_size, cfg.block_size, generator)
+        losses = torch.zeros(len(batches))
+        for k, (contexts, targets) in enumerate(batches):
             _logits, loss = model(contexts, targets)
             losses[k] = loss
         result[dataset_type] = losses.mean().item()
@@ -61,8 +72,10 @@ def train(cfg: TrainConfig, step_count: int, model: GPT, tokenized_train_data: t
     timer = timer or PhaseTimer(enabled=False)
     # A reasonable lr for adam is 1e-3 to 1e-4.
     optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.learning_rate, fused=True)
-    # Own generator for training batches, so the order of training data doesn't depend on how much randomness dropout consumes.
+    # Generator for training batches, so the order of training data doesn't depend on how much randomness dropout consumes.
     train_generator = torch.Generator().manual_seed(cfg.train_seed)
+    # Cache the batches (where the count = cfg.eval_iters) of the train/val sets in order to estimate loss over the whole sets, for reuse in the hot loop.
+    eval_batches = make_eval_batches(cfg, tokenized_train_data, tokenized_val_data)
     for step in range(step_count):
         # Zero out gradients for this iteration.
         with timer.phase("zero_grad"):
@@ -76,7 +89,7 @@ def train(cfg: TrainConfig, step_count: int, model: GPT, tokenized_train_data: t
         # An untrained model is near-uniform over C tokens, so loss should start near ~ln(C)
         if step % 50 == 0 or step == step_count-1:
             with timer.phase("estimate_loss"):
-                losses = estimate_loss(cfg, model, tokenized_train_data, tokenized_val_data)
+                losses = estimate_loss(model, eval_batches)
             print(f"step={step:04d} loss={losses}")
             # Loss per token isn't comparable across tokenizers, so also log it per character of the set we're computing loss over.
             train_bpc = bits_per_char(losses["train"], len(tokenized_train_data), num_train_chars)
