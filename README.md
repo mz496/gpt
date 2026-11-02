@@ -253,7 +253,8 @@ Answer: we overfitted. Note that the train loss is not in bpc so they're not dir
 This took quite a while (~30m per curve on my laptop), so I made these improvements:
 
 Now going to try varying how much data we have:
-- Sped up the training a bit by implementing the heads as a new dimension, which showed ~38% improvement on the default (smaller) config, `just gpt-train --tokenizer char` from ~59s to ~37s on my laptop (holding everything else constant).
+- Sped up the training a bit by implementing the heads as a new dimension, which showed ~30% improvement on the default (smaller) config, `just gpt-train --tokenizer char` from ~59s to ~40-43s on my laptop (holding everything else constant).
+- Also switched to using PyTorch's builtin scaled dot product attention, which didn't really change anything on my laptop, but in theory is a bit faster on CUDA.
 - Added a param to scale down the training data, instead of scaling up, but the default config was too small of a parameter model to see anything meaningful. Maybe will return to this once I scale up the model parameters again.
 
 ### Nov 2

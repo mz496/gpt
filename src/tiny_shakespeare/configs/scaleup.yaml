@@ -14,3 +14,7 @@ n_head: 6
 n_layer: 6
 block_size: 256
 dropout: 0.2
+
+# Switches
+flag_use_parallel_heads: true
+flag_use_pytorch_attention_impl: true

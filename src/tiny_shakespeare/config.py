@@ -29,6 +29,13 @@ class TrainConfig:
     block_size: int
     dropout: float
 
+    # Switches
+    # Batched attention heads vs. one module per head (changes the architecture; saved in the checkpoint's GPTConfig).
+    flag_use_parallel_heads: bool
+    # Stock torch.nn.functional.scaled_dot_product_attention vs. our handrolled one (same function; speed only).
+    # Note this only takes effect when use_parallel_heads is true.
+    flag_use_pytorch_attention_impl: bool
+
 
 def load_config(name: str) -> TrainConfig:
     """Load configs/<name>.yaml. Unknown or missing keys raise a TypeError."""

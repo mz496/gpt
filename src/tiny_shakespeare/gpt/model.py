@@ -65,6 +65,9 @@ class GPTConfig:
     # what is the max context length for predictions?
     block_size: int
     dropout: float
+    # Batch all attention heads into single tensor ops (True) vs. one Head module per head run in series (False).
+    # Changes the parameter names/shapes, so it is part of the architecture. Defaults to True so older checkpoints still load.
+    flag_use_parallel_heads: bool = True
 
 def get_device():
     return (
@@ -245,11 +248,14 @@ class MultiHeadAttentionParallelHeads(torch.nn.Module):
 
     tril: torch.Tensor
 
-    def __init__(self, config: GPTConfig, num_heads: int, head_size: int):
+    def __init__(self, config: GPTConfig, num_heads: int, head_size: int, flag_use_pytorch_attention_impl: bool = False):
         super().__init__()
         self.num_heads = num_heads
         self.head_size = head_size
         self.dropout_p = config.dropout # For the attention-internal dropout
+        # torch.nn.functional.scaled_dot_product_attention (True) vs. our handrolled scaled_dot_product_attention (False).
+        # Same function and weights either way, so this is not part of the architecture.
+        self.flag_use_pytorch_attention_impl = flag_use_pytorch_attention_impl
 
         # All heads along the out-dimension layer at once
         self.query = torch.nn.Linear(config.n_embd, num_heads * head_size, bias=False)
@@ -295,7 +301,16 @@ class MultiHeadAttentionParallelHeads(torch.nn.Module):
         attn_mask = self.tril[:T_q, :T_k]
 
         # [B, H, T (really T_q), hs]
-        attention_heads: torch.Tensor = scaled_dot_product_attention(q, k, v, attn_mask, self.dropout_p if self.training else 0)
+        dropout_p = self.dropout_p if self.training else 0
+        attention_heads: torch.Tensor
+        if self.flag_use_pytorch_attention_impl:
+            if T_q == T_k:
+                # is_causal lets fused kernels (e.g. flash attention on CUDA) skip building the mask
+                attention_heads = F.scaled_dot_product_attention(q, k, v, dropout_p=dropout_p, is_causal=True)
+            else:
+                attention_heads = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask.bool(), dropout_p=dropout_p)
+        else:
+            attention_heads = scaled_dot_product_attention(q, k, v, attn_mask, dropout_p)
 
         # Reshape back
         # [B, H, T, hs] -> [B, T, H, hs] -> [B, T, H*hs]
@@ -355,15 +370,21 @@ class Block(torch.nn.Module):
     """
     Transformer block.
     """
-    def __init__(self, config: GPTConfig):
+    def __init__(self, config: GPTConfig, flag_use_pytorch_attention_impl: bool = False):
         super().__init__()
         # Masked Multi-Head Attention
         # The intuition is that we are letting attention run in this dimensional space
         # With multi-head self-attention we subdivide into several smaller-dimensional spaces.
-        # -- Sequential version kept for posterity/learning
-        # self.sa_heads = MultiHeadAttention(config, num_heads=config.n_head, head_size=config.n_embd // config.n_head)
-        # -- Batched version:
-        self.sa_heads = MultiHeadAttentionParallelHeads(config, num_heads=config.n_head, head_size=config.n_embd // config.n_head)
+        head_size = config.n_embd // config.n_head
+        if config.flag_use_parallel_heads:
+            # Batched version
+            self.sa_heads = MultiHeadAttentionParallelHeads(
+                config, num_heads=config.n_head, head_size=head_size,
+                flag_use_pytorch_attention_impl=flag_use_pytorch_attention_impl,
+            )
+        else:
+            # Sequential version kept for posterity/learning
+            self.sa_heads = MultiHeadAttention(config, num_heads=config.n_head, head_size=head_size)
 
         # Feed Forward
         # Note that these embedding dimensions are independently looking at one another, after the self-attention has done the cross-communication.
@@ -385,7 +406,7 @@ class Block(torch.nn.Module):
 
 class GPT(torch.nn.Module):
 
-    def __init__(self, config: GPTConfig):
+    def __init__(self, config: GPTConfig, flag_use_pytorch_attention_impl: bool = False):
         super().__init__()
         self.config = config
         # From Figure 1: The Transformer https://proceedings.neurips.cc/paper_files/paper/2017/file/3f5ee243547dee91fbd053c1c4a845aa-Paper.pdf:
@@ -397,7 +418,7 @@ class GPT(torch.nn.Module):
         # Transformer blocks
         # Learn longer-range dependencies by passing the enriched vectors along in sequence.
         # e.g. first block is token<>token dependencies; second block might be word<>word dependencies or something
-        self.blocks = torch.nn.Sequential(*[Block(config) for _ in range(config.n_layer)])
+        self.blocks = torch.nn.Sequential(*[Block(config, flag_use_pytorch_attention_impl) for _ in range(config.n_layer)])
         self.ln_final = torch.nn.LayerNorm(config.n_embd)
 
         # Final linear layer

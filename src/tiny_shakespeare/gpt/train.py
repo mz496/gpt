@@ -127,8 +127,9 @@ def main():
         n_layer=cfg.n_layer,
         block_size=cfg.block_size,
         dropout=cfg.dropout,
+        flag_use_parallel_heads=cfg.flag_use_parallel_heads,
     )
-    model = GPT(config).to(device)
+    model = GPT(config, flag_use_pytorch_attention_impl=cfg.flag_use_pytorch_attention_impl).to(device)
     tokenized_train_data = torch.tensor(tokenizer.encode_string(train_data)).to(device)
     tokenized_val_data = torch.tensor(tokenizer.encode_string(validation_data)).to(device)
 
@@ -137,6 +138,7 @@ def main():
         name = f"{name}_{args.suffix}"
     run = wandb.init(project="gpt-experiments", name=name, group=args.group, config={
         **asdict(config),
+        "flag_use_pytorch_attention_impl": cfg.flag_use_pytorch_attention_impl,
         "config_name": args.config,
         "tokenizer": args.tokenizer,
         "train_fraction": args.train_fraction,
