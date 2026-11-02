@@ -5,9 +5,10 @@ import torch
 import wandb
 
 from ..config import CONFIG_NAMES, TrainConfig, load_config
+from ..timer import PhaseTimer
 from ..tokenizers.utils import TOKENIZER_NAMES, make_tokenizer
-from ..utils import bits_per_char, get_tiny_shakespeare_data, take_fraction, timestamp
-from .model import GPT, GPTConfig, get_device, save_checkpoint
+from ..utils import bits_per_char, get_device, get_tiny_shakespeare_data, take_fraction, timestamp
+from .model import GPT, GPTConfig, save_checkpoint
 
 def get_batch(tokenized: torch.Tensor, batch_size: int, block_size: int, generator: torch.Generator | None = None) -> tuple[torch.Tensor, torch.Tensor]:
     """
@@ -56,37 +57,45 @@ def estimate_loss(cfg: TrainConfig, model: torch.nn.Module, tokenized_train_data
     model.train()
     return result
 
-def train(cfg: TrainConfig, step_count: int, model: GPT, tokenized_train_data: torch.Tensor, tokenized_val_data: torch.Tensor, num_train_chars: int, num_val_chars: int, run: wandb.Run) -> GPT:
+def train(cfg: TrainConfig, step_count: int, model: GPT, tokenized_train_data: torch.Tensor, tokenized_val_data: torch.Tensor, num_train_chars: int, num_val_chars: int, run: wandb.Run, timer: PhaseTimer | None = None) -> GPT:
+    timer = timer or PhaseTimer(enabled=False)
     # A reasonable lr for adam is 1e-3 to 1e-4.
     optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.learning_rate)
     # Own generator for training batches, so the order of training data doesn't depend on how much randomness dropout consumes.
     train_generator = torch.Generator().manual_seed(cfg.train_seed)
     for step in range(step_count):
         # Zero out gradients for this iteration.
-        model.zero_grad()
+        with timer.phase("zero_grad"):
+            model.zero_grad()
 
-        contexts, targets = get_batch(tokenized_train_data, batch_size=cfg.batch_size, block_size=cfg.block_size, generator=train_generator)
-        _logits, loss = model(contexts, targets)
+        with timer.phase("get_batch"):
+            contexts, targets = get_batch(tokenized_train_data, batch_size=cfg.batch_size, block_size=cfg.block_size, generator=train_generator)
+        with timer.phase("forward"):
+            _logits, loss = model(contexts, targets)
         # expect logits shape [B, T, C]
         # An untrained model is near-uniform over C tokens, so loss should start near ~ln(C)
         if step % 50 == 0 or step == step_count-1:
-            losses = estimate_loss(cfg, model, tokenized_train_data, tokenized_val_data)
+            with timer.phase("estimate_loss"):
+                losses = estimate_loss(cfg, model, tokenized_train_data, tokenized_val_data)
             print(f"step={step:04d} loss={losses}")
             # Loss per token isn't comparable across tokenizers, so also log it per character of the set we're computing loss over.
             train_bpc = bits_per_char(losses["train"], len(tokenized_train_data), num_train_chars)
             val_bpc = bits_per_char(losses["validation"], len(tokenized_val_data), num_val_chars)
-            run.log({
-                "train/loss": losses["train"],
-                "train/loss_bpc": train_bpc,
-                "validation/loss": losses["validation"],
-                "validation/loss_bpc": val_bpc,
-            }, step=step)
+            with timer.phase("wandb_log"):
+                run.log({
+                    "train/loss": losses["train"],
+                    "train/loss_bpc": train_bpc,
+                    "validation/loss": losses["validation"],
+                    "validation/loss_bpc": val_bpc,
+                }, step=step)
 
         # Write in gradients based on how bad this iteration was.
-        loss.backward()
+        with timer.phase("backward"):
+            loss.backward()
 
         # Update weights with those gradients.
-        optimizer.step() # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
+        with timer.phase("optimizer_step"):
+            optimizer.step() # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
     return model
 
 def main():
@@ -97,23 +106,30 @@ def main():
     parser.add_argument("--suffix", default=None, help="appended to the wandb run name (and checkpoint name), e.g. <timestamp>_abc123")
     parser.add_argument("--group", default=None, help="wandb group; runs passing the same string are grouped together in the UI")
 
-    # Train fraction is mostly useful for when the model is large, but we don't want to scale up the model for runtime purposes, and instead scale down the data.
+    # Train fraction is for when the model is large, but we don't want to scale up the model for runtime purposes, and instead scale down the data.
     parser.add_argument("--train-fraction", type=float, default=1.0, help="train on this fraction (0, 1] of the train split, sampled as random 1000-char chunks (nested across fractions), to measure how loss scales with data; the validation split is unchanged")
-    
+    # Toggle the timer.
+    parser.add_argument("--profile", action="store_true", help="time each phase of the training loop, syncing the device around each so async MPS/CUDA work is attributed correctly (slows training a bit)")
+
     args = parser.parse_args()
     if not 0 < args.train_fraction <= 1:
         parser.error("--train-fraction must be in (0, 1]")
     cfg = load_config(args.config)
 
     torch.manual_seed(cfg.train_seed)  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
-    full_train_data, validation_data = get_tiny_shakespeare_data()
+
+    # Coarse timings of everything around the training loop (data, tokenizer, wandb, checkpoint)
+    setup_timer = PhaseTimer()
+    with setup_timer.phase("load_data"):
+        full_train_data, validation_data = get_tiny_shakespeare_data()
     tokenizer = make_tokenizer(args.tokenizer, args.bpe_vocab_size)
     # NOTE: By using only train data for the tokenization:
     # - CharTokenizer technically could fail when asked to encode the validation set, since the tokenizer only knows about chars in the train set.
     #   - In practice, this does not happen on tiny shakespeare (there is nothing in the validation set that is unrepresented in the train set).
     #   - (This is because it's not a true byte-level tokenizer; ie roughly just A-Z + a-z + punctuation and not all 256 bytes).
     # - This is mostly to make BPETokenizer/RegexBPETokenizer losses more accurate since they learn their frequencies/merges only on train.
-    tokenizer.train(full_train_data)
+    with setup_timer.phase("tokenizer_train"):
+        tokenizer.train(full_train_data)
     # With --train-fraction, the tokenizer is still fit on the FULL train split and only the data the model trains on is subsampled.
     # This holds the vocab fixed across fractions (and a char vocab fit on a small slice would be missing chars that show up in validation).
     train_data = take_fraction(full_train_data, args.train_fraction)
@@ -129,29 +145,39 @@ def main():
         dropout=cfg.dropout,
         flag_use_parallel_heads=cfg.flag_use_parallel_heads,
     )
-    model = GPT(config, flag_use_pytorch_attention_impl=cfg.flag_use_pytorch_attention_impl).to(device)
-    tokenized_train_data = torch.tensor(tokenizer.encode_string(train_data)).to(device)
-    tokenized_val_data = torch.tensor(tokenizer.encode_string(validation_data)).to(device)
+    with setup_timer.phase("build_model"):
+        model = GPT(config, flag_use_pytorch_attention_impl=cfg.flag_use_pytorch_attention_impl).to(device)
+    with setup_timer.phase("tokenize_data"):
+        tokenized_train_data = torch.tensor(tokenizer.encode_string(train_data)).to(device)
+        tokenized_val_data = torch.tensor(tokenizer.encode_string(validation_data)).to(device)
 
     name = timestamp()
     if args.suffix:
         name = f"{name}_{args.suffix}"
-    run = wandb.init(project="gpt-experiments", name=name, group=args.group, config={
-        **asdict(config),
-        "flag_use_pytorch_attention_impl": cfg.flag_use_pytorch_attention_impl,
-        "config_name": args.config,
-        "tokenizer": args.tokenizer,
-        "train_fraction": args.train_fraction,
-        "train_chars": len(train_data),
-    })
+    with setup_timer.phase("wandb_init"):
+        run = wandb.init(project="gpt-experiments", name=name, group=args.group, config={
+            **asdict(config),
+            "flag_use_pytorch_attention_impl": cfg.flag_use_pytorch_attention_impl,
+            "config_name": args.config,
+            "tokenizer": args.tokenizer,
+            "train_fraction": args.train_fraction,
+            "train_chars": len(train_data),
+        })
     # A unique and sortable run ID to identify this run.
     run_id = f"{name}_{run.id}"
 
-    model = train(cfg, cfg.train_steps, model, tokenized_train_data, tokenized_val_data, len(train_data), len(validation_data), run)
+    train_timer = PhaseTimer(enabled=args.profile, sync=True)
+    with setup_timer.phase("train"):
+        model = train(cfg, cfg.train_steps, model, tokenized_train_data, tokenized_val_data, len(train_data), len(validation_data), run, train_timer)
 
-    checkpoint_path = save_checkpoint(model, run_id, args.tokenizer, args.bpe_vocab_size)
+    with setup_timer.phase("save_checkpoint"):
+        checkpoint_path = save_checkpoint(model, run_id, args.tokenizer, args.bpe_vocab_size)
     print(f"saved checkpoint to {checkpoint_path}")
-    run.finish()
+    
+    with setup_timer.phase("wandb_finish"):
+        run.finish()
+    setup_timer.report("overall")
+    train_timer.report("training loop")
     print(f"run_id={run_id}")
 
 if __name__ == "__main__":

@@ -23,6 +23,9 @@ import math
 import random
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
+
+import torch
 
 def get_tiny_shakespeare_data() -> tuple[str, str]:
     """
@@ -72,3 +75,10 @@ def bits_per_char(loss_nats_per_token: float, num_tokens: int, num_chars: int) -
     nats/token * (1 bit / ln 2 nats) * (tokens in the eval text / chars in the eval text) = bits/char
     """
     return loss_nats_per_token * num_tokens / num_chars / math.log(2)
+
+def get_device() -> Literal["cuda", "mps", "cpu"]:
+    return (
+        "cuda" if torch.cuda.is_available()
+        else "mps" if torch.backends.mps.is_available()
+        else "cpu"
+    )

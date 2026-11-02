@@ -3,8 +3,8 @@ import argparse
 import torch
 
 from ..tokenizers.utils import make_tokenizer
-from ..utils import get_tiny_shakespeare_data
-from .model import get_device, load_checkpoint
+from ..utils import get_device, get_tiny_shakespeare_data
+from .model import load_checkpoint
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate text from a trained run's checkpoint")

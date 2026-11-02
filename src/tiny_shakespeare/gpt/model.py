@@ -51,6 +51,8 @@ from pathlib import Path
 import torch
 from torch.nn import LayerNorm, functional as F
 
+from ..utils import get_device
+
 @dataclass(frozen=True)
 class GPTConfig:
     """
@@ -68,13 +70,6 @@ class GPTConfig:
     # Batch all attention heads into single tensor ops (True) vs. one Head module per head run in series (False).
     # Changes the parameter names/shapes, so it is part of the architecture. Defaults to True so older checkpoints still load.
     flag_use_parallel_heads: bool = True
-
-def get_device():
-    return (
-        "cuda" if torch.cuda.is_available()
-        else "mps" if torch.backends.mps.is_available()
-        else "cpu"
-    )
 
 class FeedForward(torch.nn.Module):
     """
