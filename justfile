@@ -25,6 +25,10 @@ compare-tokenizers *args:
 compare-tokenizers-scaleup *args:
     uv run --locked -m scripts.compare_tokenizers_scaleup {{args}}
 
+# Learning curve: char/bpe/regex_bpe on 12.5/25/50/100% of the train split
+data-scaling *args:
+    uv run --locked -m scripts.data_scaling {{args}}
+
 # --- W&B helpers ---
 
 wandb-create-view *args:

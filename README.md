@@ -244,12 +244,21 @@ Regex-then-BPE:
 
 #### Scaling up again
 
-Overfitted: (Note that the train loss is not in bpc so they're not directly comparable, but the divergence where train keeps ticking down and val goes back up looks pretty clearly bad)
+What happens if we take the best tokenizer and scale up the model again? (alongside the char-based baseline)
+
+Answer: we overfitted. Note that the train loss is not in bpc so they're not directly comparable, but the divergence where train keeps ticking down and val goes back up looks pretty clearly bad.
 
 ![](assets/2026-10-29-overfit.png)
 
-I sped up the training a bit by implementing the heads as a new dimension, which took a `just gpt-train --tokenizer char` run from ~59s to ~37s.
+This took quite a while (~30m per curve on my laptop), so I made these improvements:
 
-TODOs:
-- Increase data?
-- Do the data plot: best validation bpc vs. data size (log) for each tokenizer, to see how much having more data helps
+Now going to try varying how much data we have:
+- Sped up the training a bit by implementing the heads as a new dimension, which showed ~38% improvement on the default (smaller) config, `just gpt-train --tokenizer char` from ~59s to ~37s on my laptop (holding everything else constant).
+- Added a param to scale down the training data, instead of scaling up, but the default config was too small of a parameter model to see anything meaningful. Maybe will return to this once I scale up the model parameters again.
+
+### Nov 2
+
+TODO:
+- Speed up the attention op even further?
+- Pull in full works of shakespeare
+- Run on a beefy remote GPU

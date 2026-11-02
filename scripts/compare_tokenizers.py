@@ -29,7 +29,7 @@ import subprocess
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -39,8 +39,10 @@ from scripts.wandb_views import DEFAULT_PROJECT, add_run, create_view, load_view
 
 # Tailwind v3 hex values (without the #).
 AMBER_600 = "d97706"
-LIME_300_TO_600 = ["bef264", "a3e635", "84cc16", "65a30d"]
-INDIGO_300_TO_600 = ["a5b4fc", "818cf8", "6366f1", "4f46e5"]
+LIME_600 = "65a30d"
+LIME_300_TO_600 =["bef264", "a3e635", "84cc16", "65a30d"]
+INDIGO_600 = "4f46e5"
+INDIGO_300_TO_600 =["a5b4fc", "818cf8", "6366f1", "4f46e5"]
 
 
 @dataclass
@@ -50,6 +52,8 @@ class RunSpec:
     bpe_vocab_size: int | None
     color: str
     display_name: str
+    # Extra `gpt-train` arguments, e.g. ["--train-fraction", "0.5"].
+    extra_args: list[str] = field(default_factory=list[str])
 
 
 def shade_for(index: int, count: int, shades: list[str]) -> str:
@@ -91,6 +95,7 @@ def train(spec: RunSpec, group: str, log_dir: Path, config: str | None = None) -
         command += ["--config", config]
     if spec.bpe_vocab_size is not None:
         command += ["--bpe-vocab-size", str(spec.bpe_vocab_size)]
+    command += spec.extra_args
     log_path = log_dir / f"{spec.label}.log"
     log(f"{spec.label}: training started (output in {log_path})")
     start = time.monotonic()
