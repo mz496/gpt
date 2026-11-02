@@ -60,7 +60,7 @@ def estimate_loss(cfg: TrainConfig, model: torch.nn.Module, tokenized_train_data
 def train(cfg: TrainConfig, step_count: int, model: GPT, tokenized_train_data: torch.Tensor, tokenized_val_data: torch.Tensor, num_train_chars: int, num_val_chars: int, run: wandb.Run, timer: PhaseTimer | None = None) -> GPT:
     timer = timer or PhaseTimer(enabled=False)
     # A reasonable lr for adam is 1e-3 to 1e-4.
-    optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.learning_rate)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.learning_rate, fused=True)
     # Own generator for training batches, so the order of training data doesn't depend on how much randomness dropout consumes.
     train_generator = torch.Generator().manual_seed(cfg.train_seed)
     for step in range(step_count):
