@@ -5,6 +5,7 @@ eval_seed: 1338
 batch_size: 32
 learning_rate: 1.0e-3
 eval_iters: 50
+eval_chunk_size: 50
 
 # Model
 n_embd: 32

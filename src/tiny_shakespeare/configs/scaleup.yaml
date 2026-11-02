@@ -7,6 +7,8 @@ eval_seed: 1338
 batch_size: 64
 learning_rate: 3.0e-4
 eval_iters: 50
+# Smaller than eval_iters to bound activation memory at this model size.
+eval_chunk_size: 10
 
 # Model
 n_embd: 384

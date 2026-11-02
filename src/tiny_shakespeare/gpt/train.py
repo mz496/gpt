@@ -39,7 +39,10 @@ EvalBatches = dict[str, list[tuple[torch.Tensor, torch.Tensor]]]
 
 def make_eval_batches(cfg: TrainConfig, tokenized_train_data: torch.Tensor, tokenized_val_data: torch.Tensor) -> EvalBatches:
     """
-    Build the cfg.eval_iters (contexts, targets) batches used for loss estimation, per dataset.
+    Build the cfg.eval_iters (contexts, targets) batches used for loss estimation, per dataset, grouped into chunks.
+
+    Each chunk concatenates up to cfg.eval_chunk_size consecutive batches along the batch dimension, so that estimate_loss can run a single forward per chunk.
+    The last chunk is smaller when eval_iters isn't a multiple of eval_chunk_size.
 
     The batches are the same for every estimate (and for every model): each dataset gets a fresh generator seeded with cfg.eval_seed.
     This makes estimates comparable across steps and across model implementations, and independent of dropout/init randomness.
@@ -48,21 +51,31 @@ def make_eval_batches(cfg: TrainConfig, tokenized_train_data: torch.Tensor, toke
     result: EvalBatches = {}
     for dataset_type, data in [("train", tokenized_train_data), ("validation", tokenized_val_data)]:
         generator = torch.Generator().manual_seed(cfg.eval_seed)
-        result[dataset_type] = [get_batch(data, cfg.batch_size, cfg.block_size, generator) for _ in range(cfg.eval_iters)]
+        batches = [get_batch(data, cfg.batch_size, cfg.block_size, generator) for _ in range(cfg.eval_iters)]
+        result[dataset_type] = [
+            (torch.cat([contexts for contexts, _ in chunk]), torch.cat([targets for _, targets in chunk]))
+            for chunk in (batches[i:i + cfg.eval_chunk_size] for i in range(0, len(batches), cfg.eval_chunk_size))
+        ]
     return result
 
 @torch.no_grad
 def estimate_loss(model: torch.nn.Module, eval_batches: EvalBatches) -> dict[str, float]:
     """
     Estimate loss over train, validation as the mean loss over the fixed batches from make_eval_batches.
+
+    Each chunk's loss is a mean over that chunk's tokens, so we weight by the chunk's number of samples to get the exact mean over all tokens
+    (chunks differ in size only when the last one is smaller due to divisibility).
     """
     model.eval()
     result: dict[str, float] = {}
-    for dataset_type, batches in eval_batches.items():
+    for dataset_type, chunks in eval_batches.items():
         # Compute the mean per dataset type.
         # model(contexts, targets) outputs (logits, loss) where loss is 0-dim float
-        losses = torch.stack([model(contexts, targets)[1] for contexts, targets in batches])
-        result[dataset_type] = losses.mean().item()
+        # Everything stays on-device (model, contexts, targets, losses) until the single .item() at the end, so there is no sync per chunk.
+        # Weights are Python ints so multiplying doesn't copy anything to the device.
+        weighted_losses = [model(contexts, targets)[1] * contexts.shape[0] for contexts, targets in chunks]
+        total_samples = sum(contexts.shape[0] for contexts, _ in chunks)
+        result[dataset_type] = (torch.stack(weighted_losses).sum() / total_samples).item()
     model.train()
     return result
 
@@ -171,6 +184,7 @@ def main():
         run = wandb.init(project="gpt-experiments", name=name, group=args.group, config={
             **asdict(config),
             "flag_use_pytorch_attention_impl": cfg.flag_use_pytorch_attention_impl,
+            "eval_chunk_size": cfg.eval_chunk_size,
             "config_name": args.config,
             "tokenizer": args.tokenizer,
             "train_fraction": args.train_fraction,
