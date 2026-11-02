@@ -51,8 +51,6 @@ from pathlib import Path
 import torch
 from torch.nn import LayerNorm, functional as F
 
-from ..utils import get_device
-
 @dataclass(frozen=True)
 class GPTConfig:
     """
@@ -431,9 +429,8 @@ class GPT(torch.nn.Module):
         
         Returns:
         - logits ([B, T, C] a distribution over vocab of size C)
-        - loss (float)
+        - loss (0-dim; float)
         """
-        device = get_device()
         B, T = idx.shape
         # C := N_EMBD
         # token embedding:
@@ -443,7 +440,7 @@ class GPT(torch.nn.Module):
         # pos embedding:
         # [T] in: just [0..T-1] to index into position embedding.
         # [T, C] out: the N_EMBD-size embeddings for every position from 0 to T
-        pos_emb = self.position_embedding(torch.arange(0, T).to(device))
+        pos_emb = self.position_embedding(torch.arange(0, T).to(idx.device))
         # (broadcast position embeddings across the B batches)
         x = tok_emb + pos_emb # [B, T, C]
         # apply transformer blocks

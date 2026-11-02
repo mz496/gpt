@@ -60,10 +60,8 @@ def estimate_loss(model: torch.nn.Module, eval_batches: EvalBatches) -> dict[str
     result: dict[str, float] = {}
     for dataset_type, batches in eval_batches.items():
         # Compute the mean per dataset type.
-        losses = torch.zeros(len(batches))
-        for k, (contexts, targets) in enumerate(batches):
-            _logits, loss = model(contexts, targets)
-            losses[k] = loss
+        # model(contexts, targets) outputs (logits, loss) where loss is 0-dim float
+        losses = torch.stack([model(contexts, targets)[1] for contexts, targets in batches])
         result[dataset_type] = losses.mean().item()
     model.train()
     return result
@@ -74,7 +72,7 @@ def train(cfg: TrainConfig, step_count: int, model: GPT, tokenized_train_data: t
     optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.learning_rate, fused=True)
     # Generator for training batches, so the order of training data doesn't depend on how much randomness dropout consumes.
     train_generator = torch.Generator().manual_seed(cfg.train_seed)
-    # Cache the batches (where the count = cfg.eval_iters) of the train/val sets in order to estimate loss over the whole sets, for reuse in the hot loop.
+    # Cache the batches (where the batch count = cfg.eval_iters) of the train/val sets in order to estimate loss over the whole sets, for reuse in the hot loop.
     eval_batches = make_eval_batches(cfg, tokenized_train_data, tokenized_val_data)
     for step in range(step_count):
         # Zero out gradients for this iteration.
@@ -133,6 +131,7 @@ def main():
 
     # Coarse timings of everything around the training loop (data, tokenizer, wandb, checkpoint)
     setup_timer = PhaseTimer()
+
     with setup_timer.phase("load_data"):
         full_train_data, validation_data = get_tiny_shakespeare_data()
     tokenizer = make_tokenizer(args.tokenizer, args.bpe_vocab_size)
@@ -146,6 +145,7 @@ def main():
     # With --train-fraction, the tokenizer is still fit on the FULL train split and only the data the model trains on is subsampled.
     # This holds the vocab fixed across fractions (and a char vocab fit on a small slice would be missing chars that show up in validation).
     train_data = take_fraction(full_train_data, args.train_fraction)
+
     device = get_device()
     print(f"available device: {device}")
 
