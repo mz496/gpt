@@ -182,13 +182,10 @@ def main():
         name = f"{name}_{args.suffix}"
     with setup_timer.phase("wandb_init"):
         run = wandb.init(project="gpt-experiments", name=name, group=args.group, config={
-            **asdict(config),
-            "flag_use_pytorch_attention_impl": cfg.flag_use_pytorch_attention_impl,
-            "eval_chunk_size": cfg.eval_chunk_size,
-            "config_name": args.config,
-            "tokenizer": args.tokenizer,
-            "train_fraction": args.train_fraction,
-            "train_chars": len(train_data),
+            "main_config": asdict(cfg),
+            "model_config": asdict(config),
+            "_args": vars(args),
+            "_debug": {"train_chars": len(train_data)},
         })
     # A unique and sortable run ID to identify this run.
     run_id = f"{name}_{run.id}"
