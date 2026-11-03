@@ -20,9 +20,10 @@ def main():
 
     model, tokenizer_name, bpe_vocab_size = load_checkpoint(args.run_id, device)
     # The tokenizer is retrained on the data, which is deterministic for both tokenizers.
-    train_data, validation_data = get_tiny_shakespeare_data()
+    # This must match train.py, which fits the tokenizer on the FULL train split only (even when --train-fraction subsamples what the model sees).
+    train_data, _validation_data = get_tiny_shakespeare_data()
     tokenizer = make_tokenizer(tokenizer_name, bpe_vocab_size)
-    tokenizer.train(train_data + validation_data)
+    tokenizer.train(train_data)
     if len(tokenizer.get_vocab()) != model.config.vocab_size:
         raise ValueError(f"vocab size {len(tokenizer.get_vocab())} does not match the checkpoint's {model.config.vocab_size}")
 
