@@ -10,6 +10,10 @@ bigram *args:
 gpt-train *args:
     uv run --locked -m src.tiny_shakespeare.gpt.train {{args}}
 
+# Trains the decoder-only transformer on a Modal GPU worker; checkpoints go to the gpt-checkpoints volume
+modal-train *args:
+    uv run --locked modal run scripts/modal_train.py --args "{{args}}"
+
 # Generates from a specified training run ID checkpoint
 gpt-generate run_id *args:
     uv run --locked -m src.tiny_shakespeare.gpt.generate {{run_id}} {{args}}
