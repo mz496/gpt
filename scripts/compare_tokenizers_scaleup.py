@@ -7,11 +7,13 @@ Same flow as compare_tokenizers: train, then add the runs to a new wandb view, r
 Usage (from the repo root, with wandb logged in):
     just compare-tokenizers-scaleup
     just compare-tokenizers-scaleup --entity my-team --max-parallel 1
+    just compare-tokenizers-scaleup --modal
     uv run --locked -m scripts.compare_tokenizers_scaleup --help
 
 Arguments:
     --name NAME           view name suffix; the view is named "<timestamp>_<NAME>" (default: tokenizers-scaleup)
     --max-parallel N      CAP on trainings running at once (default: 2, i.e. both together)
+    --modal               train on Modal (`just modal-train`) instead of locally; the wandb view is still built locally
     --entity ENTITY       wandb entity (default: your default entity)
     --project PROJECT     wandb project (default: gpt-experiments)
     --log-dir DIR         where each run's training output goes (default: a fresh temp dir, printed at start)
@@ -44,12 +46,13 @@ def main():
     parser = argparse.ArgumentParser(description=f"Compare char vs regex_bpe-{BPE_VOCAB_SIZE} on the {CONFIG} config.")
     parser.add_argument("--name", default="tokenizers-scaleup")
     parser.add_argument("--max-parallel", type=int, default=1, help="cap on trainings running at once")
+    parser.add_argument("--modal", action="store_true", help="train on Modal instead of locally")
     parser.add_argument("--entity", default=None)
     parser.add_argument("--project", default=DEFAULT_PROJECT)
     parser.add_argument("--log-dir", type=Path, default=None)
     args = parser.parse_args()
 
-    run_comparison(build_specs(), args.name, resolve_entity(args.entity), args.project, args.max_parallel, args.log_dir, config=CONFIG)
+    run_comparison(build_specs(), args.name, resolve_entity(args.entity), args.project, args.max_parallel, args.log_dir, config=CONFIG, modal=args.modal)
 
 
 if __name__ == "__main__":

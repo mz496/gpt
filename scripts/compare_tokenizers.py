@@ -88,9 +88,9 @@ def log(message: str) -> None:
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {message}", flush=True)
 
 
-def train(spec: RunSpec, group: str, log_dir: Path, config: str | None = None) -> str:
-    """Trains one run, writing its output to a log file. Returns the wandb run id. Raises if training fails."""
-    command = ["just", "gpt-train", "--tokenizer", spec.tokenizer, "--group", group]
+def train(spec: RunSpec, group: str, log_dir: Path, config: str | None = None, modal: bool = False) -> str:
+    """Trains one run (locally, or on Modal if `modal`), writing its output to a log file. Returns the wandb run id. Raises if training fails."""
+    command = ["just", "modal-train" if modal else "gpt-train", "--tokenizer", spec.tokenizer, "--group", group]
     if config is not None:
         command += ["--config", config]
     if spec.bpe_vocab_size is not None:
@@ -118,6 +118,7 @@ def run_comparison(
     max_parallel: int,
     log_dir: Path | None,
     config: str | None = None,
+    modal: bool = False,
 ) -> None:
     """Trains every spec (at most `max_parallel` at once), then adds them all, renamed and colored, to a new view. Exits 1 if any training failed."""
     view_name = f"{datetime.now().strftime('%Y-%m-%dT%H:%M:%S')}_{name}"
@@ -131,7 +132,7 @@ def run_comparison(
     failures: list[str] = []
     log(f"training {len(specs)} runs, at most {max_parallel} at a time")
     with ThreadPoolExecutor(max_workers=max_parallel) as pool:
-        futures = {spec.label: pool.submit(train, spec, view_name, log_dir, config) for spec in specs}
+        futures = {spec.label: pool.submit(train, spec, view_name, log_dir, config, modal) for spec in specs}
         for spec in specs:
             try:
                 run_ids[spec.label] = futures[spec.label].result()

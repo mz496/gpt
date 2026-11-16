@@ -2,12 +2,12 @@
 
 > [!IMPORTANT]
 > Part of a series on contributing to AI safety and understandability by building intuition in order to ask and answer better questions
+>
 > 1. [[repo]](https://github.com/mz496/mnist) Preliminaries (LeNet; neural nets; workflow)
 > 2. [here] Transformers (attention; tokenization; finetuning)
 > 3. [[repo]](https://github.com/mz496/rl) Reinforcement learning (classical; RLHF; RLVR)
 
-Following Karpathy's https://karpathy.ai/zero-to-hero.html -> Let's build GPT
-
+Following Karpathy's [https://karpathy.ai/zero-to-hero.html](https://karpathy.ai/zero-to-hero.html) -> Let's build GPT
 
 ## Lab notebook
 
@@ -33,6 +33,7 @@ Here Karpathy starts speedrunning some things that are not super obvious in the 
 - Adding dropout with p=0.2: train loss 2.016, validation loss 2.136. Slightly regressed; Karpathy scales up before showing these numbers but I was curious what would happen if not.
 
 Now, upping the parameters to match Karpathy's:
+
 ```
 - train_steps: 1500
 - n_embd: 384
@@ -84,6 +85,8 @@ Against the world ford then masters,
 My povoker and give by father; ther'd, so fe
 Whose inpect
 ```
+
+
 
 ### Oct 28
 
@@ -141,13 +144,17 @@ The result of BPE on the tiny shakespeare data with a target vocab size of 300, 
   299: 115,116 ('st')
 ```
 
+
+
 #### What does changing the tokenizer do to the loss?
 
 I standardized:
+
 - train steps = 1500
 - config from before the scaleup that got the best result from Oct 27 into `default.yaml` and post-scaleup as `scaleup.yaml`
 
 and ran this in a few different combinations, varying:
+
 - the tokenizer (`char`, `bpe`)
 - config (`default`, `scaleup`)
 - BPE vocab size
@@ -185,6 +192,7 @@ First Murderers, my lord, and hims sto mandiow, the people Hear of the in the g 
 ```
 
 Whereas the char-level one just has more local word level structure for roughly bits-per-char loss 3.412:
+
 ```
 And npvontim my aveid bonSe and sata s'dovin you,
 Lavel bit
@@ -204,6 +212,8 @@ And mys ces a o of henor fonch sreaw, a
 And wrut veme.
 ```
 
+
+
 ### Oct 29
 
 **Can we improve loss just by improving tokenization? Yes! Now what happens when we scale up again on the best tokenization method found?**
@@ -212,12 +222,16 @@ And wrut veme.
 - I made the tokenizers always run on the train set only. Previously, I was running the tokenizer on train + validation, which was probably making bpc loss on the BPE tokenizer slightly optimistic. This isn't a problem for the char-level tokenizer since there's nothing in the validation set that's unrepresentable in the train charset.
 
 Some fixes, both of which make loss curves incomparable with earlier loss curves past this point:
+
 - Fixed a scaling factor that was too large ($d_\text{model}$ instead of $d_k$) in the self-attention computation
 - Reduced eval iters when estimating loss from 200 to 50. This took the compare tokenizers run using the default config from 11 minutes to 6.5 minutes. This makes the loss curve a bit noisier though. For example, the regex_bpe 2048 curve stays cleanly below the regex_bpe 1024 curve when the eval_iters was 200, but barely exceeds it when I reduced it, likely due to this noise.
+
+
 
 #### Comparing tokenizers on the default config
 
 I ran a script comparing the char tokenizer, the BPE tokenizer on vocab sizes {300, 512, 1024, 2048}, and the regex-then-BPE tokenizer on vocab sizes {300, 512, 1024, 2048}, all using [default.yaml config at 34a5b38](https://github.com/mz496/gpt/blob/34a5b38dd375aa90183ac7c2ff814e1e3aec7e83/src/tiny_shakespeare/configs/default.yaml) and observed that regex-then-BPE on 2048 was best.
+
 - With the plain BPE tokenizer, I noticed that actually we overfit/overwhelm the model such that it trains *slower* on a 2048-vocab than a 1024 vocab. (this is the darkest green line remaining above the 3rd-darkest green line from iteration ~1100 to the end graphed)
 
 ![](assets/2026-10-29-loss-on-tokenizers.png)
@@ -232,15 +246,21 @@ Char-based: chars/token = 1
 
 BPE:
 
-| | 300 | 512 | 1024 | 2048 |
-| --- | --- | --- | --- | --- |
+
+|             | 300   | 512   | 1024  | 2048  |
+| ----------- | ----- | ----- | ----- | ----- |
 | Chars/token | 1.420 | 2.044 | 2.727 | 3.451 |
+
 
 Regex-then-BPE:
 
-| | 300 | 512 | 1024 | 2048 |
-| --- | --- | --- | --- | --- |
+
+|             | 300   | 512   | 1024  | 2048  |
+| ----------- | ----- | ----- | ----- | ----- |
 | Chars/token | 1.414 | 2.081 | 2.743 | 3.317 |
+
+
+
 
 #### Scaling up again
 
@@ -253,13 +273,16 @@ Answer: we overfitted. Note that the train loss is not in bpc so they're not dir
 This took quite a while (~30m per curve on my laptop), so I made these improvements:
 
 Now going to try varying how much data we have:
+
 - Sped up the training a bit by implementing the heads as a new dimension, which showed ~30% improvement on the default (smaller) config, `just gpt-train --tokenizer char` from ~59s to ~40-43s on my laptop (holding everything else constant).
 - Also switched to using PyTorch's builtin scaled dot product attention, which didn't really change anything on my laptop, but in theory is a bit faster on CUDA.
 - Added a param to scale down the training data, instead of scaling up, but the default config was too small of a parameter model to see anything meaningful. Maybe will return to this once I scale up the model parameters again.
 
-### Nov 2
 
-TODO:
-- Speed up the attention op even further?
-- Pull in full works of shakespeare
-- Run on a beefy remote GPU
+
+### Nov 16
+
+Simply porting the run to modal on the default config - we get from ~40-43s to ~14s on a T4 GPU on modal, using `modal_train.py` on [19f8e30](https://github.com/mz496/gpt/blob/19f8e30)
+
+
+
