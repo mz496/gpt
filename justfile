@@ -14,6 +14,14 @@ gpt-train *args:
 modal-train *args:
     uv run --locked modal run scripts/modal_train.py --args "{{args}}"
 
+# Downloads the TinyStories dataset into the gpt-data Modal volume so that modal-train doesn't have to
+modal-prewarm:
+    uv run --locked modal run scripts/modal_prewarm_data.py
+
+# Lists the Hugging Face datasets already cached in the gpt-data Modal volume
+modal-prewarm-check:
+    uv run --locked modal run scripts/modal_prewarm_data_check.py
+
 # Generates from a specified training run ID checkpoint
 gpt-generate run_id *args:
     uv run --locked -m src.tiny_shakespeare.models.gpt.generate {{run_id}} {{args}}
