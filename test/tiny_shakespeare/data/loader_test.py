@@ -1,3 +1,6 @@
+from pathlib import Path
+
+import numpy as np
 import torch
 
 from src.tiny_shakespeare.data.loader import get_batch, take_fraction
@@ -58,3 +61,17 @@ def test_get_batch_with_same_generator_seed_is_reproducible_and_ignores_global_r
 
     assert torch.equal(first[0], second[0])
     assert torch.equal(first[1], second[1])
+
+
+def test_get_batch_from_a_memmap_matches_a_tensor_with_the_same_generator_seed(tmp_path: Path) -> None:
+    ids = np.arange(1000, dtype=np.uint16)
+    path = tmp_path / "tokens.bin"
+    ids.tofile(path)
+    memmap = np.memmap(path, dtype=np.uint16, mode="r")
+
+    from_tensor = get_batch(torch.from_numpy(ids.astype(np.int64)), 8, 4, torch.Generator().manual_seed(0))
+    from_memmap = get_batch(memmap, 8, 4, torch.Generator().manual_seed(0))
+
+    assert from_memmap[0].dtype == from_memmap[1].dtype == torch.long
+    assert torch.equal(from_tensor[0], from_memmap[0])
+    assert torch.equal(from_tensor[1], from_memmap[1])
