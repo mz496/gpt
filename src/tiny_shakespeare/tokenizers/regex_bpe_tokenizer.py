@@ -34,21 +34,20 @@ class RegexBPETokenizer(Tokenizer):
 
     def __init__(self, target_vocab_size: int):
         """
-        Initialized with the target vocab size.
+        Initialized with the target vocab size, which includes any special tokens registered before train().
         """
+        super().__init__()
         self.merges: list[Merge] = []
 
         self._merged_token_counter: int = NUM_BASE_TOKENS
 
-        self._vocab: dict[int, bytes] = build_vocab(self.merges)
-
         # Encoded chunks by chunk text, since the same chunks (" the", ",") repeat a lot.
         self._chunk_cache: dict[str, list[int]] = {}
 
-        # The vocab size increases by 1 every time we merge, so this puts an upper bound on the number of passes done.
+        # The vocab size increases by 1 every time we merge, so this (less the special tokens) puts an upper bound on the number of passes done.
         if target_vocab_size <= NUM_BASE_TOKENS:
             raise Exception(f"cannot set a target vocab size <= the number of distinct tokens in UTF-8 ({NUM_BASE_TOKENS})")
-        self._num_merge_passes = target_vocab_size - NUM_BASE_TOKENS
+        self.target_vocab_size = target_vocab_size
 
     def _get_next_merged_token_counter(self):
         """
@@ -59,24 +58,23 @@ class RegexBPETokenizer(Tokenizer):
         return next_counter
 
     @override
-    def get_vocab(self) -> dict[int, bytes]:
-        """Cached by train(). Note that before train() is called, it's just all raw bytes, unmerged."""
-        return self._vocab
-
-    @override
-    def train(self, s: str) -> None:
+    def _train_on_pieces(self, pieces: list[str]) -> None:
         """
         Learns the merges based on the data frequencies.
 
         The text is split into chunks, and each pass finds the best merge to do based on the highest pair frequency across all chunks and records it.
-        Pairs never span two chunks.
+        Pairs never span two chunks (and so never two pieces, the text on either side of a special token).
 
         Inputs:
-        - s: the data string to train the tokenizer on
+        - pieces: the data strings to train the tokenizer on
         """
-        chunks = [string_to_bytes(chunk) for chunk in re.findall(GPT4_SPLIT_PATTERN, s)]
+        # The vocab holds the raw bytes, the merges, and the special tokens.
+        num_merge_passes = self.target_vocab_size - NUM_BASE_TOKENS - len(self._special_tokens)
+        if num_merge_passes <= 0:
+            raise ValueError(f"target vocab size {self.target_vocab_size} leaves no room for merges after {NUM_BASE_TOKENS} bytes and {len(self._special_tokens)} special tokens")
+        chunks = [string_to_bytes(chunk) for piece in pieces for chunk in re.findall(GPT4_SPLIT_PATTERN, piece)]
 
-        for _ in range(self._num_merge_passes):
+        for _ in range(num_merge_passes):
             try:
                 from_tokens = most_common_pair(chunks)
                 merge = Merge(from_tokens, self._get_next_merged_token_counter())
@@ -87,11 +85,10 @@ class RegexBPETokenizer(Tokenizer):
                 print(f"merges halted: {e}")
                 break
 
-        self._vocab = build_vocab(self.merges)
         self._chunk_cache = {}
 
     @override
-    def encode_string(self, s: str) -> list[int]:
+    def _encode_plain(self, s: str) -> list[int]:
         """
         Encode the string as a sequence of tokens, one regex chunk at a time.
 
@@ -111,7 +108,7 @@ class RegexBPETokenizer(Tokenizer):
         return tokens
 
     @override
-    def decode_as_string(self, tokens: list[int]) -> str:
+    def _decode_plain(self, tokens: list[int]) -> str:
         """
         Decodes the tokens back to a string. Chunk boundaries don't matter here, since everything expands back to bytes.
 
@@ -133,7 +130,15 @@ class RegexBPETokenizer(Tokenizer):
     def state(self) -> dict[str, Any]:
         # The target is saved rather than derived from the merges, since training can halt before reaching it.
         # The pattern is saved so that a later change to it can't silently reinterpret old merges.
-        return {"target_vocab_size": NUM_BASE_TOKENS + self._num_merge_passes, "pattern": GPT4_SPLIT_PATTERN, "merges": merges_to_state(self.merges)}
+        return {"target_vocab_size": self.target_vocab_size, "pattern": GPT4_SPLIT_PATTERN, "merges": merges_to_state(self.merges)}
+
+    @override
+    def _num_learned_tokens(self) -> int:
+        return NUM_BASE_TOKENS + len(self.merges)
+
+    @override
+    def _learned_vocab(self) -> dict[int, bytes]:
+        return build_vocab(self.merges)
 
     @classmethod
     @override
@@ -141,7 +146,8 @@ class RegexBPETokenizer(Tokenizer):
         if state["pattern"] != GPT4_SPLIT_PATTERN:
             raise ValueError("the saved tokenizer was trained with a different split pattern than GPT4_SPLIT_PATTERN")
         tokenizer = cls(state["target_vocab_size"])
+        tokenizer.register_special_tokens(state["special_tokens"])
         tokenizer.merges = merges_from_state(state["merges"])
         tokenizer._merged_token_counter = NUM_BASE_TOKENS + len(tokenizer.merges)
-        tokenizer._vocab = build_vocab(tokenizer.merges)
+        tokenizer._trained = True
         return tokenizer
