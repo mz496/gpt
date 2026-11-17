@@ -7,9 +7,11 @@ import torch
 import wandb
 
 from ...config import CONFIG_NAMES, TrainConfig, load_config
+from ...data.data_source import TOKENIZER_TEXT_MAX_CHARS
 from ...data.loader import get_batch
 from ...data.prepare import prepare
 from ...data.tiny_shakespeare_source import TinyShakespeareSource
+from ...data.tiny_stories_source import TinyStoriesSource
 from ...timer import PhaseTimer
 from ...tokenizers.utils import TOKENIZER_NAMES, make_tokenizer
 from ...utils import bits_per_char, get_device, timestamp
@@ -115,8 +117,10 @@ def train(cfg: TrainConfig, step_count: int, model: GPT, tokenized_train_data: n
     return model
 
 def main():
-    parser = argparse.ArgumentParser(description="Train a GPT on tiny shakespeare.")
+    parser = argparse.ArgumentParser(description="Train a GPT on a text dataset.")
     parser.add_argument("--config", choices=CONFIG_NAMES, default="default", help="which config in configs/ to use")
+    parser.add_argument("--source", choices=["tiny-shakespeare", "tiny-stories"], default="tiny-shakespeare", help="which dataset to train on")
+    parser.add_argument("--tokenizer-text-only", action="store_true", help="train the model on only the text the tokenizer is trained on (the first part of the train split, see TOKENIZER_TEXT_MAX_CHARS), to try out a big dataset quickly")
     parser.add_argument("--tokenizer", choices=TOKENIZER_NAMES, default="char", help="which tokenizer to use")
     parser.add_argument("--bpe-vocab-size", type=int, default=512, help="target vocab size when --tokenizer=bpe or regex_bpe")
     parser.add_argument("--suffix", default=None, help="appended to the wandb run name (and checkpoint name), e.g. <timestamp>_abc123")
@@ -135,7 +139,7 @@ def main():
     # Coarse timings of everything around the training loop (data, tokenizer, wandb, checkpoint)
     setup_timer = PhaseTimer()
 
-    source = TinyShakespeareSource()
+    source = TinyStoriesSource() if args.source == "tiny-stories" else TinyShakespeareSource()
     tokenizer = make_tokenizer(args.tokenizer, args.bpe_vocab_size)
     tokenizer.register_special_tokens(source.special_tokens)
     # NOTE: By using only train data for the tokenization:
@@ -164,7 +168,7 @@ def main():
     with setup_timer.phase("build_model"):
         model = GPT(config, flag_use_pytorch_attention_impl=cfg.flag_use_pytorch_attention_impl).to(device)
     with setup_timer.phase("tokenize_data"):
-        data = prepare(source, tokenizer)
+        data = prepare(source, tokenizer, max_train_chars=TOKENIZER_TEXT_MAX_CHARS if args.tokenizer_text_only else None)
 
     name = timestamp()
     if args.suffix:

@@ -14,25 +14,36 @@ class PreparedData:
     train_chars: int
     validation_chars: int
 
-def encode_split(source: DataSource, split: Split, tokenizer: Tokenizer, dtype: np.dtype[Any]) -> tuple[np.ndarray[Any, Any], int]:
+def encode_split(source: DataSource, split: Split, tokenizer: Tokenizer, dtype: np.dtype[Any], max_chars: int | None = None) -> tuple[np.ndarray[Any, Any], int]:
     """
     Tokenizes one split chunk by chunk. Returns the token ids and the number of chars they came from.
+
+    If max_chars is given, it stops after the chunk that reaches it, the same rule as DataSource.get_tokenizer_text,
+    so that a big split can be tried out on its first part.
 
     Tokens never span chunks, so for a BPE tokenizer a chunk boundary in the middle of text can change the tokens near it versus encoding the whole split at once.
     """
     arrays: list[np.ndarray[Any, Any]] = []
     num_chars = 0
+    if max_chars is not None and max_chars <= 0:
+        return np.empty(0, dtype=dtype), 0
     for chunk in source.iter_text(split):
         num_chars += len(chunk)
         arrays.append(np.asarray(tokenizer.encode_string(chunk), dtype=dtype))
+        # Checked here rather than before reading a chunk, so we never pull a chunk we won't use.
+        if max_chars is not None and num_chars >= max_chars:
+            break
     return (np.concatenate(arrays) if arrays else np.empty(0, dtype=dtype)), num_chars
 
-def prepare(source: DataSource, tokenizer: Tokenizer) -> PreparedData:
+def prepare(source: DataSource, tokenizer: Tokenizer, max_train_chars: int | None = None) -> PreparedData:
     """
     The train and validation splits of the source as arrays of token ids, using an already-trained tokenizer.
+
+    max_train_chars limits the train split to its first chunks totalling at least that many chars (see encode_split); the validation split is always whole.
+    train_chars says how much text was actually used.
     """
     # Narrowest unsigned dtype that fits every id; get_batch widens each window to int64.
     dtype = np.dtype(np.uint16 if len(tokenizer.get_vocab()) <= 2**16 else np.uint32)
-    train, train_chars = encode_split(source, "train", tokenizer, dtype)
+    train, train_chars = encode_split(source, "train", tokenizer, dtype, max_train_chars)
     validation, validation_chars = encode_split(source, "validation", tokenizer, dtype)
     return PreparedData(train=train, validation=validation, train_chars=train_chars, validation_chars=validation_chars)
