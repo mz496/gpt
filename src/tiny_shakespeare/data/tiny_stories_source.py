@@ -12,7 +12,7 @@ FILENAMES: dict[Split, str] = {
 }
 # The files hold one story after another, separated by this.
 END_OF_TEXT = "<|endoftext|>"
-DEFAULT_CHUNK_CHARS = 1_000_000
+DEFAULT_CHUNK_CHARS = 10_000
 # How many characters we pull from the file per read.
 _CHARS_PER_RAW_READ = 1 << 24
 

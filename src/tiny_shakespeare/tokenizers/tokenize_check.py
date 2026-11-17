@@ -1,7 +1,9 @@
 import argparse
 import math
+import time
 from collections import Counter
 
+from src.tiny_shakespeare.data.tiny_stories_source import TinyStoriesSource
 from src.tiny_shakespeare.tokenizers.bpe_tokenizer import BPETokenizer
 from src.tiny_shakespeare.tokenizers.regex_bpe_tokenizer import RegexBPETokenizer
 from src.tiny_shakespeare.tokenizers.utils import TOKENIZER_NAMES, make_tokenizer
@@ -24,13 +26,25 @@ def main():
     parser.add_argument("--bpe-show-merges", action="store_true", help="print the learned merges when --tokenizer is a BPE type")
     args = parser.parse_args()
 
-    source = TinyShakespeareSource()
+    source = TinyStoriesSource()
     tokenizer = make_tokenizer(args.tokenizer, args.bpe_vocab_size)
     tokenizer.register_special_tokens(source.special_tokens)
     # Same train split (and train-only fitting) as models/gpt/train.py.
+    # Each step says when it starts, since the first one waits on the download (the first time) and the rest can take a long time.
+    print(f"reading the tokenizer text from {source.name} (downloads the dataset the first time)...", flush=True)
+    start = time.perf_counter()
     train_data = source.get_tokenizer_text()
+    print(f"read {len(train_data):,} chars in {time.perf_counter() - start:.1f}s", flush=True)
+
+    print(f"training {args.tokenizer}...", flush=True)
+    start = time.perf_counter()
     tokenizer.train(train_data)
+    print(f"trained in {time.perf_counter() - start:.1f}s", flush=True)
+
+    print("encoding the same text with it...", flush=True)
+    start = time.perf_counter()
     tokens = tokenizer.encode_string(train_data)
+    print(f"encoded in {time.perf_counter() - start:.1f}s", flush=True)
     print(f"compression ratio: {len(train_data)} chars -> {len(tokens)} tokens ({len(train_data) / len(tokens):.3f} chars/token)")
 
     vocab_size = len(tokenizer.get_vocab())
