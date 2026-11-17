@@ -23,6 +23,14 @@ class FakeSource(DataSource):
             yield chunk
 
 
+def test_a_source_has_no_special_tokens_unless_it_declares_some() -> None:
+    class WithSpecials(FakeSource):
+        special_tokens = ["<|end|>"]
+
+    assert FakeSource(["a"]).special_tokens == []
+    assert WithSpecials(["a"]).special_tokens == ["<|end|>"]
+
+
 def test_get_tokenizer_text_joins_train_chunks_up_to_the_chunk_that_reaches_the_cap() -> None:
     source = FakeSource(["aaaa", "bbbb", "cccc", "dddd"])
     assert source.get_tokenizer_text(1) == "aaaa"

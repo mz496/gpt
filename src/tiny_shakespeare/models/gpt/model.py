@@ -467,18 +467,22 @@ class GPT(torch.nn.Module):
             loss = F.cross_entropy(logits.view(B*T, vocab_size), targets.view(B*T,))
         return logits, loss
 
-    def generate(self, idx: torch.Tensor, max_tokens: int):
+    def generate(self, idx: torch.Tensor, max_tokens: int, stop_token_ids: set[int] | None = None):
         """
         Using the model's learned weights, generate up to `max_tokens` chars per batch.
         Inputs
         - idx: [B, T] "indices into the vocab".
+        - stop_token_ids: stop early once every batch element has generated one of these tokens (the token is kept in the output).
+          An element that stops before the others keeps being extended, so only the last stopping element's output ends at its stop token.
 
         Outputs
-        - [B, T+max_tokens]
+        - [B, T+n] where n <= max_tokens
         """
         if max_tokens <= 0:
             raise Exception("max_tokens must be > 0")
 
+        stop_tensor = torch.tensor(sorted(stop_token_ids), dtype=torch.long, device=idx.device) if stop_token_ids else None
+        stopped = torch.zeros(idx.shape[0], dtype=torch.bool, device=idx.device)
         output = idx
         for _ in range(max_tokens):
             # Build up predictions for each context from the last char on each.
@@ -501,6 +505,11 @@ class GPT(torch.nn.Module):
             # Append to each batch along the time dimension.
             # torch.cat allocates a new tensor, so no need to .clone().
             output = torch.cat([output, next_tokens], dim=1)
+
+            if stop_tensor is not None:
+                stopped |= torch.isin(next_tokens[:, 0], stop_tensor)
+                if bool(stopped.all()):
+                    break
 
         return output
 

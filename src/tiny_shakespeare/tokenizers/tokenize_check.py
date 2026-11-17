@@ -24,9 +24,11 @@ def main():
     parser.add_argument("--bpe-show-merges", action="store_true", help="print the learned merges when --tokenizer is a BPE type")
     args = parser.parse_args()
 
+    source = TinyShakespeareSource()
     tokenizer = make_tokenizer(args.tokenizer, args.bpe_vocab_size)
+    tokenizer.register_special_tokens(source.special_tokens)
     # Same train split (and train-only fitting) as models/gpt/train.py.
-    train_data = TinyShakespeareSource().get_tokenizer_text()
+    train_data = source.get_tokenizer_text()
     tokenizer.train(train_data)
     tokens = tokenizer.encode_string(train_data)
     print(f"compression ratio: {len(train_data)} chars -> {len(tokens)} tokens ({len(train_data) / len(tokens):.3f} chars/token)")

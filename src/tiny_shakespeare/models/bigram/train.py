@@ -69,6 +69,7 @@ def main():
     torch.manual_seed(1337)  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
     source = TinyShakespeareSource()
     tokenizer = CharTokenizer()
+    tokenizer.register_special_tokens(source.special_tokens)
     tokenizer.train(source.get_tokenizer_text())
     data = prepare(source, tokenizer)
     device = get_device()

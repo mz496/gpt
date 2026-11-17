@@ -26,7 +26,8 @@ def main():
     torch.manual_seed(args.generate_seed)  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
     idx = torch.zeros((1, 1), dtype=torch.long).to(device)
     with torch.no_grad():
-        result_tokens = model.generate(idx, max_tokens=args.max_tokens)
+        # Stop once the model emits a special token (e.g. end-of-text), if the tokenizer has any.
+        result_tokens = model.generate(idx, max_tokens=args.max_tokens, stop_token_ids=set(tokenizer.special_token_ids.values()))
     result = tokenizer.decode_as_string(result_tokens[0].tolist())  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType] Bad torch type stubs.
     print(result)
 

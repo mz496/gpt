@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Iterable, Iterator, Literal
+from typing import ClassVar, Iterable, Iterator, Literal
 
 Split = Literal["train", "validation"]
 # Cap on the text the tokenizer trains on; BPE training is pure Python, so it needs a sample of a big dataset, not all of it.
@@ -12,11 +12,18 @@ class DataSource(ABC):
 
     name: str
 
+    # Strings that appear literally in the text and mark something rather than being content, e.g. "<|endoftext|>" between documents.
+    # Callers register these with the tokenizer (Tokenizer.register_special_tokens) before training it. Don't mutate.
+    special_tokens: ClassVar[list[str]] = []
+
     @abstractmethod
     def iter_text(self, split: Split) -> Iterator[str]:
         """
-        The text of one split as consecutive chunks. Concatenating the chunks gives the whole split.
+        The text of one split as consecutive chunks of raw text. Concatenating the chunks gives the whole split.
+        The chunks contain the special tokens as they appear in the data.
+
         A chunk never ends in the middle of a document, so tokenizing chunk by chunk can't split a document in two.
+        Nor does it end in the middle of a special token. A source whose documents are separated by a special token cuts right after one.
         """
 
     def get_tokenizer_text(self, max_chars: int = TOKENIZER_TEXT_MAX_CHARS) -> str:

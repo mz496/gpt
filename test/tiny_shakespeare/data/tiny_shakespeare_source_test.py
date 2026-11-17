@@ -27,3 +27,7 @@ def test_tokenizer_text_is_the_train_split_and_never_the_validation_text() -> No
 
 def test_name() -> None:
     assert TinyShakespeareSource().name == "tiny-shakespeare"
+
+
+def test_it_has_no_special_tokens() -> None:
+    assert TinyShakespeareSource().special_tokens == []

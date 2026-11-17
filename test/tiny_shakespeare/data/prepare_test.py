@@ -87,3 +87,31 @@ def test_an_empty_split_gives_an_empty_array() -> None:
     assert len(prepared.train) == len(prepared.validation) == 0
     assert prepared.train.dtype == np.uint16
     assert prepared.train_chars == 0
+
+
+EOT = "<|endoftext|>"
+
+
+class DocumentSource(ChunkedSource):
+    """Chunks of documents that end with the end-of-text token, which the source declares."""
+
+    special_tokens = [EOT]
+
+
+@pytest.mark.parametrize("name", ["char", "bpe", "regex_bpe"])
+def test_a_sources_special_tokens_become_ids_in_the_prepared_data(name: str) -> None:
+    train = ["the quick brown fox" + EOT + "jumps over the lazy dog" + EOT, "then the dog chases the fox" + EOT] * 10
+    source = DocumentSource(train, ["the dog" + EOT, "the fox" + EOT])
+    tokenizer = make_tokenizer(name, 290)
+    tokenizer.register_special_tokens(source.special_tokens)
+    tokenizer.train(source.get_tokenizer_text())
+
+    prepared = prepare(source, tokenizer)
+
+    eot = tokenizer.special_token_ids[EOT]
+    assert len(tokenizer.get_vocab()) == (290 if name != "char" else len(set("".join(train).replace(EOT, ""))) + 1)
+    assert int((prepared.train == eot).sum()) == 30
+    assert int((prepared.validation == eot).sum()) == 2
+    # The delimiter text itself never reaches the data: its characters only appear as the one id.
+    assert prepared.train.tolist() == [t for chunk in train for t in tokenizer.encode_string(chunk)]
+    assert tokenizer.decode_as_string(prepared.validation.tolist()) == "the dog" + EOT + "the fox" + EOT

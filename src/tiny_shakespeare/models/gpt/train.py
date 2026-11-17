@@ -137,6 +137,7 @@ def main():
 
     source = TinyShakespeareSource()
     tokenizer = make_tokenizer(args.tokenizer, args.bpe_vocab_size)
+    tokenizer.register_special_tokens(source.special_tokens)
     # NOTE: By using only train data for the tokenization:
     # - CharTokenizer technically could fail when asked to encode the validation set, since the tokenizer only knows about chars in the train set.
     #   - In practice, this does not happen on tiny shakespeare (there is nothing in the validation set that is unrepresented in the train set).
