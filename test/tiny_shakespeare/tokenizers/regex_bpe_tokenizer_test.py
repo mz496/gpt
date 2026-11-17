@@ -1,12 +1,11 @@
-from pathlib import Path
-
 import pytest
 import regex as re
 
+from src.tiny_shakespeare.data.loader import get_data
 from src.tiny_shakespeare.tokenizers.regex_bpe_tokenizer import GPT4_SPLIT_PATTERN, RegexBPETokenizer
 from src.tiny_shakespeare.tokenizers.utils import make_tokenizer
 
-SHAKESPEARE = (Path(__file__).parent.parent.parent.parent / "src" / "tiny_shakespeare" / "input_data" / "tiny_shakespeare.txt").read_text()
+SHAKESPEARE = "".join(get_data("tiny-shakespeare"))
 
 
 def roundtrip(s: str, target_vocab_size: int = 300) -> None:

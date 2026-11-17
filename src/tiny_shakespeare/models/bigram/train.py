@@ -4,7 +4,7 @@ import torch
 
 from ...tokenizers.char_tokenizer import CharTokenizer
 from ...tokenizers.tokenizer import Tokenizer
-from ...data.loader import get_tiny_shakespeare_data
+from ...data.loader import get_data
 from ...utils import get_device
 from .model import BigramModel
 
@@ -79,7 +79,7 @@ def train(step_count: int, train_data: str, validation_data: str, tokenizer: Tok
 
 def main():
     torch.manual_seed(1337)  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
-    train_data, validation_data = get_tiny_shakespeare_data()
+    train_data, validation_data = get_data("tiny-shakespeare")
     tokenizer = CharTokenizer()
     tokenizer.train(train_data + validation_data)
     device = get_device()

@@ -5,7 +5,7 @@ from collections import Counter
 from src.tiny_shakespeare.tokenizers.bpe_tokenizer import BPETokenizer
 from src.tiny_shakespeare.tokenizers.regex_bpe_tokenizer import RegexBPETokenizer
 from src.tiny_shakespeare.tokenizers.utils import TOKENIZER_NAMES, make_tokenizer
-from src.tiny_shakespeare.data.loader import get_tiny_shakespeare_data
+from src.tiny_shakespeare.data.loader import get_data
 from src.tiny_shakespeare.utils import bits_per_char, bytes_to_string
 
 
@@ -26,7 +26,7 @@ def main():
 
     tokenizer = make_tokenizer(args.tokenizer, args.bpe_vocab_size)
     # Same train split (and train-only fitting) as models/gpt/train.py.
-    train_data, _validation_data = get_tiny_shakespeare_data()
+    train_data, _validation_data = get_data("tiny-shakespeare")
     tokenizer.train(train_data)
     tokens = tokenizer.encode_string(train_data)
     print(f"compression ratio: {len(train_data)} chars -> {len(tokens)} tokens ({len(train_data) / len(tokens):.3f} chars/token)")

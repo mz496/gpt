@@ -5,7 +5,7 @@ import torch
 import wandb
 
 from ...config import CONFIG_NAMES, TrainConfig, load_config
-from ...data.loader import get_tiny_shakespeare_data, take_fraction
+from ...data.loader import get_data, take_fraction
 from ...timer import PhaseTimer
 from ...tokenizers.utils import TOKENIZER_NAMES, make_tokenizer
 from ...utils import bits_per_char, get_device, timestamp
@@ -160,7 +160,7 @@ def main():
     setup_timer = PhaseTimer()
 
     with setup_timer.phase("load_data"):
-        full_train_data, validation_data = get_tiny_shakespeare_data()
+        full_train_data, validation_data = get_data("tiny-shakespeare")
     tokenizer = make_tokenizer(args.tokenizer, args.bpe_vocab_size)
     # NOTE: By using only train data for the tokenization:
     # - CharTokenizer technically could fail when asked to encode the validation set, since the tokenizer only knows about chars in the train set.

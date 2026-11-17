@@ -3,7 +3,7 @@ import argparse
 import torch
 
 from ...tokenizers.utils import make_tokenizer
-from ...data.loader import get_tiny_shakespeare_data
+from ...data.loader import get_data
 from ...utils import get_device
 from .model import load_checkpoint
 
@@ -22,7 +22,7 @@ def main():
     model, tokenizer_name, bpe_vocab_size = load_checkpoint(args.run_id, device)
     # The tokenizer is retrained on the data, which is deterministic for both tokenizers.
     # This must match train.py, which fits the tokenizer on the FULL train split only (even when --train-fraction subsamples what the model sees).
-    train_data, _validation_data = get_tiny_shakespeare_data()
+    train_data, _validation_data = get_data("tiny-shakespeare")
     tokenizer = make_tokenizer(tokenizer_name, bpe_vocab_size)
     tokenizer.train(train_data)
     if len(tokenizer.get_vocab()) != model.config.vocab_size:

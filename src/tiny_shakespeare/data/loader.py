@@ -1,15 +1,18 @@
 import random
 from pathlib import Path
+from typing import Literal, assert_never
 
-def get_tiny_shakespeare_data() -> tuple[str, str]:
+Dataset = Literal["tiny-shakespeare"]
+
+def get_data(slug: Dataset) -> tuple[str, str]:
     """
-    Fetch tiny Shakespeare data.
+    Fetch the dataset with this slug as (train, validation), split 90/10.
     """
-    # url = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
-    # with urlopen(url) as f:
-    #     data: str = f.read().decode("utf-8")
-    with open(Path(__file__).parent.parent / "input_data" / "tiny_shakespeare.txt") as f:
-        data: str = f.read()
+    match slug:
+        case "tiny-shakespeare":
+            data = (Path(__file__).parent / "tiny_shakespeare.txt").read_text()
+        case _:
+            assert_never(slug)
     n = len(data)
     train_split_len = int(n * 0.9)
     train = data[:train_split_len]
