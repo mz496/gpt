@@ -1,14 +1,17 @@
 from pathlib import Path
-from typing import Any, Literal, assert_never
+from typing import Any, Iterable, Iterator, Literal, assert_never
 
 import numpy as np
 import torch
 
 Dataset = Literal["tiny-shakespeare"]
+Split = Literal["train", "validation"]
+# Cap on the text the tokenizer trains on; BPE training is pure Python, so it needs a sample of a big dataset, not all of it.
+TOKENIZER_TEXT_MAX_CHARS = 100_000_000
 
-def get_data(slug: Dataset) -> tuple[str, str]:
+def _read_splits(slug: Dataset) -> tuple[str, str]:
     """
-    Fetch the dataset with this slug as (train, validation), split 90/10.
+    The whole dataset with this slug as (train, validation), split 90/10. Only for datasets small enough to hold as one string; callers use iter_text.
     """
     match slug:
         case "tiny-shakespeare":
@@ -20,6 +23,44 @@ def get_data(slug: Dataset) -> tuple[str, str]:
     train = data[:train_split_len]
     validation = data[train_split_len+1:]
     return train, validation
+
+def iter_text(slug: Dataset, split: Split) -> Iterator[str]:
+    """
+    The text of one split of the dataset as consecutive chunks, so that big datasets never need to be held in memory as one string.
+
+    Concatenating the chunks gives the whole split. A chunk never ends in the middle of a document (for tiny shakespeare the whole split is one chunk).
+    """
+    train, validation = _read_splits(slug)
+    match split:
+        case "train":
+            yield train
+        case "validation":
+            yield validation
+        case _:
+            assert_never(split)
+
+def take_chars(chunks: Iterable[str], max_chars: int) -> str:
+    """
+    Concatenates chunks until at least max_chars chars have been collected; the chunk that crosses the cap is kept whole, so documents aren't cut in half.
+    """
+    if max_chars <= 0:
+        return ""
+    taken: list[str] = []
+    total = 0
+    for chunk in chunks:
+        taken.append(chunk)
+        total += len(chunk)
+        # Check here rather than at the top of the loop, so we never pull a chunk we won't use.
+        if total >= max_chars:
+            break
+    return "".join(taken)
+
+def get_tokenizer_text(slug: Dataset, max_chars: int = TOKENIZER_TEXT_MAX_CHARS) -> str:
+    """
+    The text to train the tokenizer on: the start of the train split, capped at (about) max_chars.
+    Only the train split, so the tokenizer learns nothing from the validation text.
+    """
+    return take_chars(iter_text(slug, "train"), max_chars)
 
 def get_batch(tokenized_data: np.ndarray[Any, Any], batch_size: int, block_size: int, generator: torch.Generator | None = None) -> tuple[torch.Tensor, torch.Tensor]:
     """

@@ -6,7 +6,8 @@ import torch
 
 from ...tokenizers.char_tokenizer import CharTokenizer
 from ...tokenizers.tokenizer import Tokenizer
-from ...data.loader import get_batch, get_data
+from ...data.loader import get_batch, get_tokenizer_text
+from ...data.prepare import PreparedData, prepare
 from ...utils import get_device
 from .model import BigramModel
 
@@ -40,23 +41,21 @@ def estimate_loss(model: torch.nn.Module, tokenized_train_data: np.ndarray[Any, 
     return result
 
 
-def train(step_count: int, train_data: str, validation_data: str, tokenizer: Tokenizer, device: str) -> BigramModel:
+def train(step_count: int, data: PreparedData, tokenizer: Tokenizer, device: str) -> BigramModel:
     model = BigramModel(len(tokenizer.get_vocab())).to(device)
-    tokenized_train_data = np.asarray(tokenizer.encode_string(train_data))
-    tokenized_val_data = np.asarray(tokenizer.encode_string(validation_data))
     # A reasonable lr for adam is 1e-3 to 1e-4.
     optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE)
     for step in range(step_count):
         # Zero out gradients for this iteration.
         model.zero_grad()
 
-        contexts, targets = get_batch(tokenized_train_data, batch_size=BATCH_SIZE, block_size=BLOCK_SIZE)
+        contexts, targets = get_batch(data.train, batch_size=BATCH_SIZE, block_size=BLOCK_SIZE)
         contexts, targets = contexts.to(device), targets.to(device)
         _logits, loss = model(contexts, targets)
         # expect logits shape [B, T, C]
         # An untrained model is near-uniform over C tokens, so loss should start near ~ln(C)
         if step % 100 == 0:
-            print(f"step={step:04d} loss={estimate_loss(model, tokenized_train_data, tokenized_val_data, device)} expected init ~{math.log(len(tokenizer.get_vocab())):.3f}")
+            print(f"step={step:04d} loss={estimate_loss(model, data.train, data.validation, device)} expected init ~{math.log(len(tokenizer.get_vocab())):.3f}")
 
         # Write in gradients based on how bad this iteration was.
         loss.backward()
@@ -67,13 +66,13 @@ def train(step_count: int, train_data: str, validation_data: str, tokenizer: Tok
 
 def main():
     torch.manual_seed(1337)  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
-    train_data, validation_data = get_data("tiny-shakespeare")
     tokenizer = CharTokenizer()
-    tokenizer.train(train_data + validation_data)
+    tokenizer.train(get_tokenizer_text("tiny-shakespeare"))
+    data = prepare("tiny-shakespeare", tokenizer)
     device = get_device()
     print(f"available device: {device}")
 
-    model = train(10000, train_data, validation_data, tokenizer, device)
+    model = train(10000, data, tokenizer, device)
 
     idx = torch.zeros((1, 1), dtype=torch.long).to(device)
     result_tokens = model.generate(idx, max_tokens=1000)
