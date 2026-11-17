@@ -9,7 +9,7 @@ import wandb
 from ...config import CONFIG_NAMES, TrainConfig, load_config
 from ...data.data_source import TOKENIZER_TEXT_MAX_CHARS
 from ...data.loader import get_batch
-from ...data.prepare import prepare
+from ...data.prepare import prepare, train_tokenizer
 from ...data.tiny_shakespeare_source import TinyShakespeareSource
 from ...data.tiny_stories_source import TinyStoriesSource
 from ...timer import PhaseTimer
@@ -141,14 +141,13 @@ def main():
 
     source = TinyStoriesSource() if args.source == "tiny-stories" else TinyShakespeareSource()
     tokenizer = make_tokenizer(args.tokenizer, args.bpe_vocab_size)
-    tokenizer.register_special_tokens(source.special_tokens)
-    # NOTE: By using only train data for the tokenization:
-    # - CharTokenizer technically could fail when asked to encode the validation set, since the tokenizer only knows about chars in the train set.
-    #   - In practice, this does not happen on tiny shakespeare (there is nothing in the validation set that is unrepresented in the train set).
-    #   - (This is because it's not a true byte-level tokenizer; ie roughly just A-Z + a-z + punctuation and not all 256 bytes).
-    # - This is mostly to make BPETokenizer/RegexBPETokenizer losses more accurate since they learn their frequencies/merges only on train.
+    # NOTE: The tokenizer is fit on train data only (see train_tokenizer), except that the CharTokenizer's vocab is the characters of both splits:
+    # - A CharTokenizer can't encode a character it hasn't seen, and the validation split can have characters that the train split doesn't (TinyStories does).
+    #   Knowing that such a character exists tells it nothing about the validation text.
+    # - BPETokenizer/RegexBPETokenizer are byte-level, so they can encode anything. Fitting them only on train keeps their losses more accurate,
+    #   since they learn their frequencies/merges only on train.
     with setup_timer.phase("tokenizer_train"):
-        tokenizer.train(source.get_tokenizer_text())
+        train_tokenizer(source, tokenizer)
 
     device = get_device()
     print(f"available device: {device}")

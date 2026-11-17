@@ -7,7 +7,7 @@ import torch
 from ...tokenizers.char_tokenizer import CharTokenizer
 from ...tokenizers.tokenizer import Tokenizer
 from ...data.loader import get_batch
-from ...data.prepare import PreparedData, prepare
+from ...data.prepare import PreparedData, prepare, train_tokenizer
 from ...data.tiny_shakespeare_source import TinyShakespeareSource
 from ...utils import get_device
 from .model import BigramModel
@@ -69,8 +69,7 @@ def main():
     torch.manual_seed(1337)  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
     source = TinyShakespeareSource()
     tokenizer = CharTokenizer()
-    tokenizer.register_special_tokens(source.special_tokens)
-    tokenizer.train(source.get_tokenizer_text())
+    train_tokenizer(source, tokenizer)
     data = prepare(source, tokenizer)
     device = get_device()
     print(f"available device: {device}")

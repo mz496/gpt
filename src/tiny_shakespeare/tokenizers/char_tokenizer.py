@@ -1,4 +1,5 @@
-from typing import Any, override
+from collections.abc import Iterable
+from typing import Any, ClassVar, override
 
 from .tokenizer import Tokenizer
 
@@ -10,6 +11,8 @@ class CharTokenizer(Tokenizer):
     """
 
     name = "char"
+    # The vocab is just the set of characters, which can be collected a chunk at a time.
+    trains_on_stream: ClassVar[bool] = True
 
     def __init__(self):
         super().__init__()
@@ -20,6 +23,16 @@ class CharTokenizer(Tokenizer):
     @override
     def _train_on_pieces(self, pieces: list[str]) -> None:
         self._set_vocab(sorted(set("".join(pieces))))
+
+    @override
+    def train_on_chunks(self, chunks: Iterable[str]) -> None:
+        """Collects the characters chunk by chunk, so only the set of distinct characters is ever held, never all the text."""
+        chars: set[str] = set()
+        for chunk in chunks:
+            for piece in self._split_on_special_tokens(chunk):
+                chars.update(piece)
+        self._set_vocab(sorted(chars))
+        self._trained = True
 
     def _set_vocab(self, chars: list[str]) -> None:
         self.vocab = chars

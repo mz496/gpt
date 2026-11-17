@@ -1,3 +1,4 @@
+import itertools
 from dataclasses import dataclass
 from typing import Any
 
@@ -34,6 +35,20 @@ def encode_split(source: DataSource, split: Split, tokenizer: Tokenizer, dtype: 
         if max_chars is not None and num_chars >= max_chars:
             break
     return (np.concatenate(arrays) if arrays else np.empty(0, dtype=dtype)), num_chars
+
+def train_tokenizer(source: DataSource, tokenizer: Tokenizer) -> None:
+    """
+    Registers the source's special tokens with the tokenizer, then trains it on the source's text.
+
+    Most tokenizers learn from a sample of the train split (DataSource.get_tokenizer_text), because training is costly (BPE).
+    A tokenizer that can learn from a stream (Tokenizer.trains_on_stream, like char, whose vocab is the set of characters) gets both whole splits instead,
+    so that it has seen every character it will be asked to encode. Its vocab then includes characters that only the validation split has.
+    """
+    tokenizer.register_special_tokens(source.special_tokens)
+    if tokenizer.trains_on_stream:
+        tokenizer.train_on_chunks(itertools.chain(source.iter_text("train"), source.iter_text("validation")))
+    else:
+        tokenizer.train(source.get_tokenizer_text())
 
 def prepare(source: DataSource, tokenizer: Tokenizer, max_train_chars: int | None = None) -> PreparedData:
     """

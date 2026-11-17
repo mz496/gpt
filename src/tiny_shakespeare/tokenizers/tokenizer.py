@@ -2,6 +2,7 @@ import json
 import re
 from abc import ABC, abstractmethod
 from pathlib import Path
+from collections.abc import Iterable
 from typing import Any, ClassVar, Self
 
 # Bump when the saved layout changes, so old files fail loudly instead of loading wrong.
@@ -21,6 +22,10 @@ class Tokenizer(ABC):
 
     # Identifies the kind of tokenizer in saved files, and matches the names make_tokenizer takes.
     name: ClassVar[str]
+
+    # True if train_on_chunks learns from the chunks one at a time, without holding them all in memory.
+    # Then it's cheap to train on a whole dataset instead of a sample of it.
+    trains_on_stream: ClassVar[bool] = False
 
     def __init__(self):
         self._special_tokens: list[str] = []
@@ -65,6 +70,13 @@ class Tokenizer(ABC):
         self._train_on_pieces(pieces)
         self._vocab_cache = None
         self._trained = True
+
+    def train_on_chunks(self, chunks: Iterable[str]) -> None:
+        """
+        Like train(), on text given as chunks (consecutive pieces of the text, none of which cuts a special token in half).
+        This joins them, so it needs all the text in memory at once. A tokenizer that can learn as the chunks go by overrides it and sets trains_on_stream.
+        """
+        self.train("".join(chunks))
 
     def encode_string(self, s: str) -> list[int]:
         """Text -> tokens. Every occurrence of a special token becomes its id."""

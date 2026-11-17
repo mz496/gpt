@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from src.tiny_shakespeare.data.data_source import DataSource, Split
-from src.tiny_shakespeare.data.prepare import prepare
+from src.tiny_shakespeare.data.prepare import prepare, train_tokenizer
 from src.tiny_shakespeare.data.tiny_shakespeare_source import TinyShakespeareSource
 from src.tiny_shakespeare.tokenizers.char_tokenizer import CharTokenizer
 from src.tiny_shakespeare.tokenizers.tokenizer import Tokenizer
@@ -197,3 +197,69 @@ def test_limiting_the_train_split_to_the_tokenizer_text_trains_on_exactly_the_te
     assert source.get_tokenizer_text(cap) == "".join(used_chunks)
     assert prepared.train_chars == 60_000
     assert prepared.train.tolist() == [token for chunk in used_chunks for token in tokenizer.encode_string(chunk)]
+
+
+# --- train_tokenizer
+
+class SpyingSource(ChunkedSource):
+    """Records which splits were read and whether the tokenizer text was asked for."""
+
+    def __init__(self, train: list[str], validation: list[str]):
+        super().__init__(train, validation)
+        self.splits_read: list[Split] = []
+        self.asked_for_tokenizer_text = False
+
+    @override
+    def iter_text(self, split: Split) -> Iterator[str]:
+        self.splits_read.append(split)
+        yield from super().iter_text(split)
+
+    @override
+    def get_tokenizer_text(self, max_chars: int = 10**9) -> str:
+        self.asked_for_tokenizer_text = True
+        return super().get_tokenizer_text(max_chars)
+
+
+def test_train_tokenizer_registers_the_sources_special_tokens() -> None:
+    source = DocumentSource(["ab" + EOT], ["ba"])
+    tokenizer = make_tokenizer("regex_bpe", 300)
+
+    train_tokenizer(source, tokenizer)
+
+    assert tokenizer.special_tokens == [EOT]
+
+
+def test_a_char_tokenizer_sees_both_whole_splits_so_it_can_encode_validation_only_characters() -> None:
+    source = SpyingSource(["abc", "abc"], ["abcZ"])  # "Z" is only in validation
+    tokenizer = make_tokenizer("char", 0)
+
+    train_tokenizer(source, tokenizer)
+    prepared = prepare(source, tokenizer)  # would raise KeyError if the vocab lacked "Z"
+
+    assert sorted(source.splits_read[:2]) == ["train", "validation"]
+    assert source.asked_for_tokenizer_text is False
+    assert tokenizer.encode_string("Z") != []
+    assert tokenizer.decode_as_string(prepared.validation.tolist()) == "abcZ"
+
+
+@pytest.mark.parametrize("name", ["bpe", "regex_bpe"])
+def test_a_bpe_tokenizer_trains_on_the_tokenizer_text_only(name: str) -> None:
+    source = SpyingSource([TRAIN[:3000]], ["validation-only text " * 50])
+    tokenizer = make_tokenizer(name, 280)
+    expected = make_tokenizer(name, 280)
+    expected.train(TRAIN[:3000])
+
+    train_tokenizer(source, tokenizer)
+
+    assert source.asked_for_tokenizer_text is True
+    assert "validation" not in source.splits_read
+    assert tokenizer.get_vocab() == expected.get_vocab()
+
+
+def test_a_char_vocab_includes_characters_only_the_validation_split_has_but_never_the_special_text() -> None:
+    source = DocumentSource(["ab" + EOT + "ba"], ["z" + EOT])
+    tokenizer = make_tokenizer("char", 0)
+
+    train_tokenizer(source, tokenizer)
+
+    assert tokenizer.get_vocab() == {0: b"a", 1: b"b", 2: b"z", 3: EOT.encode()}

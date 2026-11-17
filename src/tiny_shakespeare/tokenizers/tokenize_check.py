@@ -3,6 +3,7 @@ import math
 import time
 from collections import Counter
 
+from src.tiny_shakespeare.data.prepare import train_tokenizer
 from src.tiny_shakespeare.data.tiny_stories_source import TinyStoriesSource
 from src.tiny_shakespeare.tokenizers.bpe_tokenizer import BPETokenizer
 from src.tiny_shakespeare.tokenizers.regex_bpe_tokenizer import RegexBPETokenizer
@@ -27,7 +28,6 @@ def main():
 
     source = TinyStoriesSource()
     tokenizer = make_tokenizer(args.tokenizer, args.bpe_vocab_size)
-    tokenizer.register_special_tokens(source.special_tokens)
     # Same train split (and train-only fitting) as models/gpt/train.py.
     # Each step says when it starts, since the first one waits on the download (the first time) and the rest can take a long time.
     print(f"reading the tokenizer text from {source.name} (downloads the dataset the first time)...", flush=True)
@@ -35,9 +35,10 @@ def main():
     train_data = source.get_tokenizer_text()
     print(f"read {len(train_data):,} chars in {time.perf_counter() - start:.1f}s", flush=True)
 
+    # The same as models/gpt/train.py does. A char tokenizer scans the whole dataset (both splits) rather than just the text above.
     print(f"training {args.tokenizer}...", flush=True)
     start = time.perf_counter()
-    tokenizer.train(train_data)
+    train_tokenizer(source, tokenizer)
     print(f"trained in {time.perf_counter() - start:.1f}s", flush=True)
 
     print("encoding the same text with it...", flush=True)
