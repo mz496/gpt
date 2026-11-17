@@ -1,5 +1,7 @@
 import math
+from typing import Any
 
+import numpy as np
 import torch
 
 from ...tokenizers.char_tokenizer import CharTokenizer
@@ -19,7 +21,7 @@ LEARNING_RATE = 1e-3
 EVAL_ITERS = 200
 
 @torch.no_grad
-def estimate_loss(model: torch.nn.Module, tokenized_train_data: torch.Tensor, tokenized_val_data: torch.Tensor) -> dict[str, float]:
+def estimate_loss(model: torch.nn.Module, tokenized_train_data: np.ndarray[Any, Any], tokenized_val_data: np.ndarray[Any, Any], device: str) -> dict[str, float]:
     """
     Estimate loss over train, validation based on EVAL_ITERS batches.
     """
@@ -30,6 +32,7 @@ def estimate_loss(model: torch.nn.Module, tokenized_train_data: torch.Tensor, to
         losses = torch.zeros(EVAL_ITERS)
         for k in range(EVAL_ITERS):
             contexts, targets = get_batch(data, BATCH_SIZE, BLOCK_SIZE)
+            contexts, targets = contexts.to(device), targets.to(device)
             _logits, loss = model(contexts, targets)
             losses[k] = loss
         result[dataset_type] = losses.mean().item()
@@ -39,8 +42,8 @@ def estimate_loss(model: torch.nn.Module, tokenized_train_data: torch.Tensor, to
 
 def train(step_count: int, train_data: str, validation_data: str, tokenizer: Tokenizer, device: str) -> BigramModel:
     model = BigramModel(len(tokenizer.get_vocab())).to(device)
-    tokenized_train_data = torch.tensor(tokenizer.encode_string(train_data)).to(device)
-    tokenized_val_data = torch.tensor(tokenizer.encode_string(validation_data)).to(device)
+    tokenized_train_data = np.asarray(tokenizer.encode_string(train_data))
+    tokenized_val_data = np.asarray(tokenizer.encode_string(validation_data))
     # A reasonable lr for adam is 1e-3 to 1e-4.
     optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE)
     for step in range(step_count):
@@ -48,11 +51,12 @@ def train(step_count: int, train_data: str, validation_data: str, tokenizer: Tok
         model.zero_grad()
 
         contexts, targets = get_batch(tokenized_train_data, batch_size=BATCH_SIZE, block_size=BLOCK_SIZE)
+        contexts, targets = contexts.to(device), targets.to(device)
         _logits, loss = model(contexts, targets)
         # expect logits shape [B, T, C]
         # An untrained model is near-uniform over C tokens, so loss should start near ~ln(C)
         if step % 100 == 0:
-            print(f"step={step:04d} loss={estimate_loss(model, tokenized_train_data, tokenized_val_data)} expected init ~{math.log(len(tokenizer.get_vocab())):.3f}")
+            print(f"step={step:04d} loss={estimate_loss(model, tokenized_train_data, tokenized_val_data, device)} expected init ~{math.log(len(tokenizer.get_vocab())):.3f}")
 
         # Write in gradients based on how bad this iteration was.
         loss.backward()

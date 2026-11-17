@@ -1,6 +1,8 @@
 import argparse
 from dataclasses import asdict
+from typing import Any
 
+import numpy as np
 import torch
 import wandb
 
@@ -19,7 +21,7 @@ def autocast_dtype() -> torch.dtype | None:
 
 EvalBatches = dict[str, list[tuple[torch.Tensor, torch.Tensor]]]
 
-def make_eval_batches(cfg: TrainConfig, tokenized_train_data: torch.Tensor, tokenized_val_data: torch.Tensor) -> EvalBatches:
+def make_eval_batches(cfg: TrainConfig, tokenized_train_data: np.ndarray[Any, Any], tokenized_val_data: np.ndarray[Any, Any], device: str) -> EvalBatches:
     """
     Build the cfg.eval_iters (contexts, targets) batches used for loss estimation, per dataset, grouped into chunks.
 
@@ -35,7 +37,7 @@ def make_eval_batches(cfg: TrainConfig, tokenized_train_data: torch.Tensor, toke
         generator = torch.Generator().manual_seed(cfg.eval_seed)
         batches = [get_batch(data, cfg.batch_size, cfg.block_size, generator) for _ in range(cfg.eval_iters)]
         result[dataset_type] = [
-            (torch.cat([contexts for contexts, _ in chunk]), torch.cat([targets for _, targets in chunk]))
+            (torch.cat([contexts for contexts, _ in chunk]).to(device), torch.cat([targets for _, targets in chunk]).to(device))
             for chunk in (batches[i:i + cfg.eval_chunk_size] for i in range(0, len(batches), cfg.eval_chunk_size))
         ]
     return result
@@ -64,14 +66,14 @@ def estimate_loss(model: torch.nn.Module, eval_batches: EvalBatches, dtype: torc
     model.train()
     return result
 
-def train(cfg: TrainConfig, step_count: int, model: GPT, tokenized_train_data: torch.Tensor, tokenized_val_data: torch.Tensor, num_train_chars: int, num_val_chars: int, run: wandb.Run, timer: PhaseTimer | None = None, dtype: torch.dtype | None = None) -> GPT:
+def train(cfg: TrainConfig, step_count: int, model: GPT, tokenized_train_data: np.ndarray[Any, Any], tokenized_val_data: np.ndarray[Any, Any], device: str, num_train_chars: int, num_val_chars: int, run: wandb.Run, timer: PhaseTimer | None = None, dtype: torch.dtype | None = None) -> GPT:
     timer = timer or PhaseTimer(enabled=False)
     # A reasonable lr for adam is 1e-3 to 1e-4.
     optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.learning_rate, fused=True)
     # Generator for training batches, so the order of training data doesn't depend on how much randomness dropout consumes.
     train_generator = torch.Generator().manual_seed(cfg.train_seed)
     # Cache the batches (where the batch count = cfg.eval_iters) of the train/val sets in order to estimate loss over the whole sets, for reuse in the hot loop.
-    eval_batches = make_eval_batches(cfg, tokenized_train_data, tokenized_val_data)
+    eval_batches = make_eval_batches(cfg, tokenized_train_data, tokenized_val_data, device)
     for step in range(step_count):
         # Zero out gradients for this iteration.
         with timer.phase("zero_grad"):
@@ -79,6 +81,7 @@ def train(cfg: TrainConfig, step_count: int, model: GPT, tokenized_train_data: t
 
         with timer.phase("get_batch"):
             contexts, targets = get_batch(tokenized_train_data, batch_size=cfg.batch_size, block_size=cfg.block_size, generator=train_generator)
+            contexts, targets = contexts.to(device), targets.to(device)
         with timer.phase("forward"):
             # bf16 has fp32's exponent range, so unlike fp16 no loss scaling is needed. The backward pass needs no autocast of its own.
             with torch.autocast("cuda", dtype=dtype, enabled=dtype is not None):
@@ -166,8 +169,8 @@ def main():
     with setup_timer.phase("build_model"):
         model = GPT(config, flag_use_pytorch_attention_impl=cfg.flag_use_pytorch_attention_impl).to(device)
     with setup_timer.phase("tokenize_data"):
-        tokenized_train_data = torch.tensor(tokenizer.encode_string(train_data)).to(device)
-        tokenized_val_data = torch.tensor(tokenizer.encode_string(validation_data)).to(device)
+        tokenized_train_data = np.asarray(tokenizer.encode_string(train_data))
+        tokenized_val_data = np.asarray(tokenizer.encode_string(validation_data))
 
     name = timestamp()
     if args.suffix:
@@ -184,7 +187,7 @@ def main():
 
     train_timer = PhaseTimer(enabled=args.profile, sync=True)
     with setup_timer.phase("train"):
-        model = train(cfg, cfg.train_steps, model, tokenized_train_data, tokenized_val_data, len(train_data), len(validation_data), run, train_timer, dtype)
+        model = train(cfg, cfg.train_steps, model, tokenized_train_data, tokenized_val_data, device, len(train_data), len(validation_data), run, train_timer, dtype)
 
     with setup_timer.phase("save_checkpoint"):
         checkpoint_path = save_checkpoint(model, run_id, args.tokenizer, args.bpe_vocab_size)

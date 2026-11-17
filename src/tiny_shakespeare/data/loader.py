@@ -22,31 +22,26 @@ def get_data(slug: Dataset) -> tuple[str, str]:
     validation = data[train_split_len+1:]
     return train, validation
 
-def get_batch(tokenized_data: torch.Tensor | np.ndarray[Any, Any], batch_size: int, block_size: int, generator: torch.Generator | None = None) -> tuple[torch.Tensor, torch.Tensor]:
+def get_batch(tokenized_data: np.ndarray[Any, Any], batch_size: int, block_size: int, generator: torch.Generator | None = None) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Pull `batch_size` windows of length `block_size` starting at random points in `tokenized_data`.
-    - `generator` pins the choice of window starts.
-    - `tokenized_data` is a tensor, or a numpy array (e.g. an np.memmap, so the data needn't fit in RAM).
-    Windows from a numpy array are copied out as int64 tensors on the CPU; the caller moves them to a device.
+    - `generator` pins the choice of window starts. Without one we draw from torch's global RNG, which is shared with weight init and dropout,
+      so the batches would depend on how much randomness the model itself happened to consume.
+    - `tokenized_data` is a 1-D array of token ids (e.g. an np.memmap, so the data needn't fit in RAM).
 
-    Returns two tensors (contexts, targets) of size [B, T]
+    Returns two int64 tensors (contexts, targets) of size [B, T] on the CPU; the caller moves them to a device.
     - B = batch_size
     - T = block_size
     where targets[i][j] is the token that follows the prefix context[i][:j+1].
     """
     # [B] random numbers drawn from [0, n-block_size)
     # Do we need to prevent wraparound here...?
-    starts = torch.randint(0, len(tokenized_data) - block_size, (batch_size,), generator=generator)
-    if isinstance(tokenized_data, np.ndarray):
-        # Token ids are stored in a narrow unsigned dtype (e.g. uint16), which torch doesn't fully support, so widen each window.
-        def window(start: int) -> torch.Tensor:
-            return torch.from_numpy(tokenized_data[start:start+block_size].astype(np.int64))  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
-        python_starts: list[int] = starts.tolist()  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType] Bad torch type stubs.
-        x = torch.stack([window(i) for i in python_starts])
-        y = torch.stack([window(i + 1) for i in python_starts])
-    else:
-        x = torch.stack([tokenized_data[i:i+block_size] for i in starts])
-        y = torch.stack([tokenized_data[i+1:i+block_size+1] for i in starts])
+    starts: np.ndarray[Any, Any] = torch.randint(0, len(tokenized_data) - block_size, (batch_size,), generator=generator).numpy()  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
+    # [B, T]: Broadcasts each of the B random numbers to length T using [0..T]; each pos is the index to take from the data.
+    indices = starts[:, None] + np.arange(block_size)
+    # Token ids may be stored in a narrow unsigned dtype (e.g. uint16), which torch doesn't fully support, so widen to int64.
+    x = torch.from_numpy(tokenized_data[indices].astype(np.int64))  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
+    y = torch.from_numpy(tokenized_data[indices + 1].astype(np.int64))  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
     return x, y
 
 def take_fraction(text: str, fraction: float, chunk_size: int = 1000, seed: int = 0) -> str:
