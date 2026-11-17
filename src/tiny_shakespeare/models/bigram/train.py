@@ -4,7 +4,7 @@ import torch
 
 from ...tokenizers.char_tokenizer import CharTokenizer
 from ...tokenizers.tokenizer import Tokenizer
-from ...data.loader import get_data
+from ...data.loader import get_batch, get_data
 from ...utils import get_device
 from .model import BigramModel
 
@@ -17,22 +17,6 @@ BLOCK_SIZE = 8
 LEARNING_RATE = 1e-3
 # for loss estimation
 EVAL_ITERS = 200
-
-def get_batch(tokenized: torch.Tensor, batch_size: int, block_size: int) -> tuple[torch.Tensor, torch.Tensor]:
-    """
-    Pull `batch_size` windows of length `block_size` starting at random points in `tokenized`.
-
-    Returns two tensors (contexts, targets) of size [B, T]
-    - B = batch_size
-    - T = block_size
-    where the token that follows context[i][j] is targets[i][j].
-    """
-    # [B] random numbers drawn from [0, n-block_size)
-    # Do we need to prevent wraparound here...?
-    starts = torch.randint(0, len(tokenized) - block_size, (batch_size,))
-    x = torch.stack([tokenized[i:i+block_size] for i in starts])
-    y = torch.stack([tokenized[i+1:i+block_size+1] for i in starts])
-    return x, y
 
 @torch.no_grad
 def estimate_loss(model: torch.nn.Module, tokenized_train_data: torch.Tensor, tokenized_val_data: torch.Tensor) -> dict[str, float]:

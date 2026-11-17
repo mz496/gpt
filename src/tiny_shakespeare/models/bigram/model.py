@@ -20,6 +20,11 @@ class BigramModel(torch.nn.Module):
             - B is the number of batches
             - T is the context length per-sample
         - targets: [B, T]
+
+        Note that we ignore everything except the final char of each context for predictions,
+        i.e. our examples are of the form (idx[i][j], targets[i][j]).
+        With self-attention, the way we build our training examples is exactly the same,
+        but the prediction at position j becomes a mixture of all of idx[i][:j+1] instead.
         
         Returns:
         - logits ([B, T, C] a distribution over vocab of size C)

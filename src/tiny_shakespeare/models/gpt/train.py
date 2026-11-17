@@ -5,36 +5,11 @@ import torch
 import wandb
 
 from ...config import CONFIG_NAMES, TrainConfig, load_config
-from ...data.loader import get_data, take_fraction
+from ...data.loader import get_batch, get_data, take_fraction
 from ...timer import PhaseTimer
 from ...tokenizers.utils import TOKENIZER_NAMES, make_tokenizer
 from ...utils import bits_per_char, get_device, timestamp
 from .model import GPT, GPTConfig, save_checkpoint
-
-def get_batch(tokenized: torch.Tensor, batch_size: int, block_size: int, generator: torch.Generator | None = None) -> tuple[torch.Tensor, torch.Tensor]:
-    """
-    Pull `batch_size` windows of length `block_size` starting at random points in `tokenized`.
-
-    `generator` pins the choice of window starts. Without one we draw from torch's global RNG, which is shared with weight init and dropout,
-    so the batches would depend on how much randomness the model itself happened to consume.
-
-    Returns two tensors (contexts, targets) of size [B, T]
-    - B = batch_size
-    - T = block_size
-    where targets[i][j] is the token that follows the prefix context[i][:j+1].
-
-    NOTE:
-    In the bigram model, we ignore everything except the final char for predictions.
-      i.e. our examples are of the form (context[i][j], targets[i][j])
-    During self-attention, the way we build our training examples is exactly the same,
-      but the way we read off `context` changes to make the input a mixture of all of context[i][:j+1] instead.
-    """
-    # [B] random numbers drawn from [0, n-block_size)
-    # Do we need to prevent wraparound here...?
-    starts = torch.randint(0, len(tokenized) - block_size, (batch_size,), generator=generator)
-    x = torch.stack([tokenized[i:i+block_size] for i in starts])
-    y = torch.stack([tokenized[i+1:i+block_size+1] for i in starts])
-    return x, y
 
 def autocast_dtype() -> torch.dtype | None:
     """bf16 on CUDA GPUs that support it (Ampere and newer); None (stay fp32) on mps/cpu and on older CUDA GPUs."""
