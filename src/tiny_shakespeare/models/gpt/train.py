@@ -5,9 +5,10 @@ import torch
 import wandb
 
 from ...config import CONFIG_NAMES, TrainConfig, load_config
+from ...data.loader import get_tiny_shakespeare_data, take_fraction
 from ...timer import PhaseTimer
 from ...tokenizers.utils import TOKENIZER_NAMES, make_tokenizer
-from ...utils import bits_per_char, get_device, get_tiny_shakespeare_data, take_fraction, timestamp
+from ...utils import bits_per_char, get_device, timestamp
 from .model import GPT, GPTConfig, save_checkpoint
 
 def get_batch(tokenized: torch.Tensor, batch_size: int, block_size: int, generator: torch.Generator | None = None) -> tuple[torch.Tensor, torch.Tensor]:

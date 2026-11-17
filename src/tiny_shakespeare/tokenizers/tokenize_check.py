@@ -5,7 +5,8 @@ from collections import Counter
 from src.tiny_shakespeare.tokenizers.bpe_tokenizer import BPETokenizer
 from src.tiny_shakespeare.tokenizers.regex_bpe_tokenizer import RegexBPETokenizer
 from src.tiny_shakespeare.tokenizers.utils import TOKENIZER_NAMES, make_tokenizer
-from src.tiny_shakespeare.utils import bits_per_char, bytes_to_string, get_tiny_shakespeare_data
+from src.tiny_shakespeare.data.loader import get_tiny_shakespeare_data
+from src.tiny_shakespeare.utils import bits_per_char, bytes_to_string
 
 
 def unigram_entropy(tokens: list[int]) -> float:
