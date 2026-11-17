@@ -4,7 +4,7 @@ test *args:
 
 # Trains and generates from the bigram language model
 bigram *args:
-    uv run --locked -m src.tiny_shakespeare.bigram {{args}}
+    uv run --locked -m src.tiny_shakespeare.bigram.train {{args}}
 
 # Trains the decoder-only transformer
 gpt-train *args:
