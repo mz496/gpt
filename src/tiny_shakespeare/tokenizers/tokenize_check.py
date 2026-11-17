@@ -7,7 +7,6 @@ from src.tiny_shakespeare.data.tiny_stories_source import TinyStoriesSource
 from src.tiny_shakespeare.tokenizers.bpe_tokenizer import BPETokenizer
 from src.tiny_shakespeare.tokenizers.regex_bpe_tokenizer import RegexBPETokenizer
 from src.tiny_shakespeare.tokenizers.utils import TOKENIZER_NAMES, make_tokenizer
-from src.tiny_shakespeare.data.tiny_shakespeare_source import TinyShakespeareSource
 from src.tiny_shakespeare.utils import bits_per_char, bytes_to_string
 
 

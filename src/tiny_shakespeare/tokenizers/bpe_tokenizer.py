@@ -6,7 +6,6 @@ From Karpathy's "Let's build the GPT Tokenizer", ~27:46
 
 """
 
-from pathlib import Path
 from typing import Any, override
 
 from ..utils import bytes_to_string, string_to_bytes

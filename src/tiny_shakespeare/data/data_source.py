@@ -3,7 +3,7 @@ from typing import ClassVar, Iterable, Iterator, Literal
 
 Split = Literal["train", "validation"]
 # Cap on the text the tokenizer trains on; BPE training is pure Python, so it needs a sample of a big dataset, not all of it.
-TOKENIZER_TEXT_MAX_CHARS = 100_000
+TOKENIZER_TEXT_MAX_CHARS = 1_000_000
 
 class DataSource(ABC):
     """
