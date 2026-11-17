@@ -35,6 +35,12 @@ def get_batch(tokenized: torch.Tensor, batch_size: int, block_size: int, generat
     y = torch.stack([tokenized[i+1:i+block_size+1] for i in starts])
     return x, y
 
+def autocast_dtype() -> torch.dtype | None:
+    """bf16 on CUDA GPUs that support it (Ampere and newer); None (stay fp32) on mps/cpu and on older CUDA GPUs."""
+    if get_device() == "cuda" and torch.cuda.is_bf16_supported():
+        return torch.bfloat16
+    return None
+
 EvalBatches = dict[str, list[tuple[torch.Tensor, torch.Tensor]]]
 
 def make_eval_batches(cfg: TrainConfig, tokenized_train_data: torch.Tensor, tokenized_val_data: torch.Tensor) -> EvalBatches:
@@ -59,12 +65,14 @@ def make_eval_batches(cfg: TrainConfig, tokenized_train_data: torch.Tensor, toke
     return result
 
 @torch.no_grad
-def estimate_loss(model: torch.nn.Module, eval_batches: EvalBatches) -> dict[str, float]:
+def estimate_loss(model: torch.nn.Module, eval_batches: EvalBatches, dtype: torch.dtype | None = None) -> dict[str, float]:
     """
     Estimate loss over train, validation as the mean loss over the fixed batches from make_eval_batches.
 
     Each chunk's loss is a mean over that chunk's tokens, so we weight by the chunk's number of samples to get the exact mean over all tokens
     (chunks differ in size only when the last one is smaller due to divisibility).
+
+    If dtype is given, the forwards run under autocast in that dtype (mixed precision); the losses are still fp32.
     """
     model.eval()
     result: dict[str, float] = {}
@@ -73,13 +81,14 @@ def estimate_loss(model: torch.nn.Module, eval_batches: EvalBatches) -> dict[str
         # model(contexts, targets) outputs (logits, loss) where loss is 0-dim float
         # Everything stays on-device (model, contexts, targets, losses) until the single .item() at the end, so there is no sync per chunk.
         # Weights are Python ints so multiplying doesn't copy anything to the device.
-        weighted_losses = [model(contexts, targets)[1] * contexts.shape[0] for contexts, targets in chunks]
+        with torch.autocast("cuda", dtype=dtype, enabled=dtype is not None):
+            weighted_losses = [model(contexts, targets)[1] * contexts.shape[0] for contexts, targets in chunks]
         total_samples = sum(contexts.shape[0] for contexts, _ in chunks)
         result[dataset_type] = (torch.stack(weighted_losses).sum() / total_samples).item()
     model.train()
     return result
 
-def train(cfg: TrainConfig, step_count: int, model: GPT, tokenized_train_data: torch.Tensor, tokenized_val_data: torch.Tensor, num_train_chars: int, num_val_chars: int, run: wandb.Run, timer: PhaseTimer | None = None) -> GPT:
+def train(cfg: TrainConfig, step_count: int, model: GPT, tokenized_train_data: torch.Tensor, tokenized_val_data: torch.Tensor, num_train_chars: int, num_val_chars: int, run: wandb.Run, timer: PhaseTimer | None = None, dtype: torch.dtype | None = None) -> GPT:
     timer = timer or PhaseTimer(enabled=False)
     # A reasonable lr for adam is 1e-3 to 1e-4.
     optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.learning_rate, fused=True)
@@ -95,12 +104,14 @@ def train(cfg: TrainConfig, step_count: int, model: GPT, tokenized_train_data: t
         with timer.phase("get_batch"):
             contexts, targets = get_batch(tokenized_train_data, batch_size=cfg.batch_size, block_size=cfg.block_size, generator=train_generator)
         with timer.phase("forward"):
-            _logits, loss = model(contexts, targets)
+            # bf16 has fp32's exponent range, so unlike fp16 no loss scaling is needed. The backward pass needs no autocast of its own.
+            with torch.autocast("cuda", dtype=dtype, enabled=dtype is not None):
+                _logits, loss = model(contexts, targets)
         # expect logits shape [B, T, C]
         # An untrained model is near-uniform over C tokens, so loss should start near ~ln(C)
         if step % 50 == 0 or step == step_count-1:
             with timer.phase("estimate_loss"):
-                losses = estimate_loss(model, eval_batches)
+                losses = estimate_loss(model, eval_batches, dtype)
             print(f"step={step:04d} loss={losses}")
             # Loss per token isn't comparable across tokenizers, so also log it per character of the set we're computing loss over.
             train_bpc = bits_per_char(losses["train"], len(tokenized_train_data), num_train_chars)
@@ -132,6 +143,8 @@ def main():
 
     # Train fraction is for when the model is large, but we don't want to scale up the model for runtime purposes, and instead scale down the data.
     parser.add_argument("--train-fraction", type=float, default=1.0, help="train on this fraction (0, 1] of the train split, sampled as random 1000-char chunks (nested across fractions), to measure how loss scales with data; the validation split is unchanged")
+    parser.add_argument("--precision", choices=["auto", "fp32"], default="auto", help="auto: bf16 mixed precision on CUDA GPUs that support it, fp32 elsewhere; fp32: never use mixed precision")
+
     # Toggle the timer.
     parser.add_argument("--profile", action="store_true", help="time each phase of the training loop, syncing the device around each so async MPS/CUDA work is attributed correctly (slows training a bit)")
 
@@ -162,6 +175,9 @@ def main():
     device = get_device()
     print(f"available device: {device}")
 
+    dtype = autocast_dtype() if args.precision == "auto" else None
+    print(f"training dtype: {dtype or torch.float32}")
+
     config = GPTConfig(
         vocab_size=len(tokenizer.get_vocab()),
         n_embd=cfg.n_embd,
@@ -185,14 +201,14 @@ def main():
             "main_config": asdict(cfg),
             "model_config": asdict(config),
             "_args": vars(args),
-            "_debug": {"train_chars": len(train_data)},
+            "_debug": {"train_chars": len(train_data), "device": device, "training_dtype_override": dtype},
         })
     # A unique and sortable run ID to identify this run.
     run_id = f"{name}_{run.id}"
 
     train_timer = PhaseTimer(enabled=args.profile, sync=True)
     with setup_timer.phase("train"):
-        model = train(cfg, cfg.train_steps, model, tokenized_train_data, tokenized_val_data, len(train_data), len(validation_data), run, train_timer)
+        model = train(cfg, cfg.train_steps, model, tokenized_train_data, tokenized_val_data, len(train_data), len(validation_data), run, train_timer, dtype)
 
     with setup_timer.phase("save_checkpoint"):
         checkpoint_path = save_checkpoint(model, run_id, args.tokenizer, args.bpe_vocab_size)

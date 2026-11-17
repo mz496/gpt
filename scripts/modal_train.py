@@ -22,7 +22,7 @@ import modal
 
 # Set MODAL_GPU="" to run on CPU (GPU functions need a payment method on the Modal account).
 # https://modal.com/docs/guide/gpu
-GPU = os.environ.get("MODAL_GPU", "T4") or None
+GPU = os.environ.get("MODAL_GPU", "L4") or None
 CHECKPOINT_DIR = "/vol"
 
 app = modal.App("gpt-train")
