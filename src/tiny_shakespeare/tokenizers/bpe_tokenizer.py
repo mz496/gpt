@@ -79,17 +79,17 @@ class BPETokenizer(Tokenizer):
         num_merge_passes = self.target_vocab_size - self.NUM_DISTINCT_TOKENS - len(self._special_tokens)
         if num_merge_passes <= 0:
             raise ValueError(f"target vocab size {self.target_vocab_size} leaves no room for merges after {self.NUM_DISTINCT_TOKENS} bytes and {len(self._special_tokens)} special tokens")
-        chunks = [string_to_bytes(piece) for piece in pieces]
+        chunks = [(string_to_bytes(piece), 1) for piece in pieces]
 
         for _ in range(num_merge_passes):
             try:
-                if sum(len(chunk) for chunk in chunks) <= 2:
+                if sum(len(tokens) for tokens, _ in chunks) <= 2:
                     raise IllegalMergeError("tokens must be length > 2")
                 from_tokens = most_common_pair(chunks)
                 merge = Merge(from_tokens, self._get_next_merged_token_counter())
                 # Record the merge, then apply it so we keep shrinking the pieces.
                 self.merges.append(merge)
-                chunks = [replace_for_encode(chunk, merge.from_tokens, merge.to_token) for chunk in chunks]
+                chunks = [(replace_for_encode(tokens, merge.from_tokens, merge.to_token), occurrences) for tokens, occurrences in chunks]
             except IllegalMergeError as e:
                 print(f"merges halted: {e}")
                 break

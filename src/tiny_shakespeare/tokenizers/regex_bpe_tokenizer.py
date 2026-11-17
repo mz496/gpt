@@ -4,6 +4,7 @@ Byte-pair encoding that first splits the text into chunks with the GPT-4 regex, 
 
 # Note, this is not the same as python's re.
 import regex as re
+from collections import Counter
 from typing import Any, override
 
 from ..utils import bytes_to_string, string_to_bytes
@@ -72,7 +73,12 @@ class RegexBPETokenizer(Tokenizer):
         num_merge_passes = self.target_vocab_size - NUM_BASE_TOKENS - len(self._special_tokens)
         if num_merge_passes <= 0:
             raise ValueError(f"target vocab size {self.target_vocab_size} leaves no room for merges after {NUM_BASE_TOKENS} bytes and {len(self._special_tokens)} special tokens")
-        chunks = [string_to_bytes(chunk) for piece in pieces for chunk in re.findall(GPT4_SPLIT_PATTERN, piece)]
+        # The same chunks (" the", ",") repeat a lot, so keep each distinct chunk once with how many times it occurs, in the order they first occur.
+        # That makes every pass cost the size of the distinct chunks instead of the whole text, and gives the same merges.
+        chunk_counts: Counter[str] = Counter()
+        for piece in pieces:
+            chunk_counts.update(re.findall(GPT4_SPLIT_PATTERN, piece))
+        chunks = [(string_to_bytes(chunk), occurrences) for chunk, occurrences in chunk_counts.items()]
 
         for _ in range(num_merge_passes):
             try:
@@ -80,7 +86,7 @@ class RegexBPETokenizer(Tokenizer):
                 merge = Merge(from_tokens, self._get_next_merged_token_counter())
                 # Record the merge, then apply it so we keep shrinking the chunks.
                 self.merges.append(merge)
-                chunks = [replace_for_encode(chunk, merge.from_tokens, merge.to_token) for chunk in chunks]
+                chunks = [(replace_for_encode(tokens, merge.from_tokens, merge.to_token), occurrences) for tokens, occurrences in chunks]
             except IllegalMergeError as e:
                 print(f"merges halted: {e}")
                 break
