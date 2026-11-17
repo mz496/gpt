@@ -282,7 +282,28 @@ Now going to try varying how much data we have:
 
 ### Nov 16
 
-Simply porting the run to modal on the default config - we get from ~40-43s to ~14s on a T4 GPU on modal, using `modal_train.py` on [19f8e30](https://github.com/mz496/gpt/blob/19f8e30)
+Simply porting the run to modal on the default config - we get from ~40-43s to ~14s on a T4 GPU on modal, using `modal_train.py` on [19f8e30](https://github.com/mz496/gpt/blob/19f8e30) using `just modal-train --tokenizer char --profile`
 
+Scaling up to the `scaleup` config yields actual GPU usage which is good too (`just modal-train --config scaleup --tokenizer char --profile`)
 
-
+```
+--- overall (total 858.27s) ---
+           phase     total      %  calls   ms/call    cpu ms  gpu tail ms
+           train  855.484s  99.7%      1 855483.59 855483.59         0.00
+      wandb_init    1.306s   0.2%      1   1306.42   1306.42         0.00
+    wandb_finish    0.760s   0.1%      1    759.86    759.86         0.00
+     build_model    0.478s   0.1%      1    478.12    478.11         0.00
+ save_checkpoint    0.165s   0.0%      1    165.01    165.01         0.00
+   tokenize_data    0.069s   0.0%      1     68.51     68.51         0.00
+       load_data    0.002s   0.0%      1      2.33      2.33         0.00
+ tokenizer_train    0.002s   0.0%      1      2.31      2.31         0.00
+--- training loop (total 853.25s) ---
+           phase     total      %  calls   ms/call    cpu ms  gpu tail ms
+        backward  349.493s  41.0%   1500    233.00      7.65       225.35
+   estimate_loss  331.231s  38.8%     31  10684.88  10682.13         2.74
+         forward  164.818s  19.3%   1500    109.88      4.65       105.23
+  optimizer_step    3.913s   0.5%   1500      2.61      1.35         1.26
+       get_batch    2.804s   0.3%   1500      1.87      1.84         0.03
+       zero_grad    0.767s   0.1%   1500      0.51      0.49         0.02
+       wandb_log    0.226s   0.0%     31      7.28      7.23         0.05
+```
