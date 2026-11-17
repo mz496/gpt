@@ -7,7 +7,7 @@ import torch
 import wandb
 
 from ...config import CONFIG_NAMES, TrainConfig, load_config
-from ...data.loader import get_batch, get_data, take_fraction
+from ...data.loader import get_batch, get_data
 from ...timer import PhaseTimer
 from ...tokenizers.utils import TOKENIZER_NAMES, make_tokenizer
 from ...utils import bits_per_char, get_device, timestamp
@@ -120,16 +120,12 @@ def main():
     parser.add_argument("--suffix", default=None, help="appended to the wandb run name (and checkpoint name), e.g. <timestamp>_abc123")
     parser.add_argument("--group", default=None, help="wandb group; runs passing the same string are grouped together in the UI")
 
-    # Train fraction is for when the model is large, but we don't want to scale up the model for runtime purposes, and instead scale down the data.
-    parser.add_argument("--train-fraction", type=float, default=1.0, help="train on this fraction (0, 1] of the train split, sampled as random 1000-char chunks (nested across fractions), to measure how loss scales with data; the validation split is unchanged")
     parser.add_argument("--precision", choices=["auto", "fp32"], default="auto", help="auto: bf16 mixed precision on CUDA GPUs that support it, fp32 elsewhere; fp32: never use mixed precision")
 
     # Toggle the timer.
     parser.add_argument("--profile", action="store_true", help="time each phase of the training loop, syncing the device around each so async MPS/CUDA work is attributed correctly (slows training a bit)")
 
     args = parser.parse_args()
-    if not 0 < args.train_fraction <= 1:
-        parser.error("--train-fraction must be in (0, 1]")
     cfg = load_config(args.config)
 
     torch.manual_seed(cfg.train_seed)  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
@@ -138,7 +134,7 @@ def main():
     setup_timer = PhaseTimer()
 
     with setup_timer.phase("load_data"):
-        full_train_data, validation_data = get_data("tiny-shakespeare")
+        train_data, validation_data = get_data("tiny-shakespeare")
     tokenizer = make_tokenizer(args.tokenizer, args.bpe_vocab_size)
     # NOTE: By using only train data for the tokenization:
     # - CharTokenizer technically could fail when asked to encode the validation set, since the tokenizer only knows about chars in the train set.
@@ -146,10 +142,7 @@ def main():
     #   - (This is because it's not a true byte-level tokenizer; ie roughly just A-Z + a-z + punctuation and not all 256 bytes).
     # - This is mostly to make BPETokenizer/RegexBPETokenizer losses more accurate since they learn their frequencies/merges only on train.
     with setup_timer.phase("tokenizer_train"):
-        tokenizer.train(full_train_data)
-    # With --train-fraction, the tokenizer is still fit on the FULL train split and only the data the model trains on is subsampled.
-    # This holds the vocab fixed across fractions (and a char vocab fit on a small slice would be missing chars that show up in validation).
-    train_data = take_fraction(full_train_data, args.train_fraction)
+        tokenizer.train(train_data)
 
     device = get_device()
     print(f"available device: {device}")

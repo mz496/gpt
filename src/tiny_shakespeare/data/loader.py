@@ -1,4 +1,3 @@
-import random
 from pathlib import Path
 from typing import Any, Literal, assert_never
 
@@ -43,16 +42,3 @@ def get_batch(tokenized_data: np.ndarray[Any, Any], batch_size: int, block_size:
     x = torch.from_numpy(tokenized_data[indices].astype(np.int64))  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
     y = torch.from_numpy(tokenized_data[indices + 1].astype(np.int64))  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
     return x, y
-
-def take_fraction(text: str, fraction: float, chunk_size: int = 1000, seed: int = 0) -> str:
-    """
-    A representative subsample of `text`: `fraction` of its chunk_size-character chunks, picked at random and kept in their original order.
-
-    The pick order depends only on the seed, so the subsamples are nested (the 25% sample contains the 12.5% sample), and fraction=1.0 returns the text unchanged.
-    Sampling chunks (not taking a prefix) keeps the sample from being closer to or further from the validation split's part of the file as it grows.
-    """
-    chunks = [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
-    order = list(range(len(chunks)))
-    random.Random(seed).shuffle(order)
-    keep = sorted(order[:max(1, round(len(chunks) * fraction))])
-    return "".join(chunks[i] for i in keep)

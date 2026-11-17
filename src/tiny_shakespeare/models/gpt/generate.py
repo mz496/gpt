@@ -21,7 +21,7 @@ def main():
 
     model, tokenizer_name, bpe_vocab_size = load_checkpoint(args.run_id, device)
     # The tokenizer is retrained on the data, which is deterministic for both tokenizers.
-    # This must match train.py, which fits the tokenizer on the FULL train split only (even when --train-fraction subsamples what the model sees).
+    # This must match train.py, which fits the tokenizer on the train split only.
     train_data, _validation_data = get_data("tiny-shakespeare")
     tokenizer = make_tokenizer(tokenizer_name, bpe_vocab_size)
     tokenizer.train(train_data)

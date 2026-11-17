@@ -52,7 +52,7 @@ class RunSpec:
     bpe_vocab_size: int | None
     color: str
     display_name: str
-    # Extra `gpt-train` arguments, e.g. ["--train-fraction", "0.5"].
+    # Extra `gpt-train` arguments, e.g. ["--precision", "fp32"].
     extra_args: list[str] = field(default_factory=list[str])
 
 
