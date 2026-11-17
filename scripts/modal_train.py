@@ -1,5 +1,5 @@
 """
-Runs src.tiny_shakespeare.gpt.train on a Modal GPU worker. Arguments are forwarded to train.py unchanged:
+Runs src.tiny_shakespeare.models.gpt.train on a Modal GPU worker. Arguments are forwarded to train.py unchanged:
 
     just modal-train --config default --tokenizer bpe --suffix foo
 
@@ -48,7 +48,7 @@ def train(argv: list[str]) -> None:
     sys.path.insert(0, "/root")
     sys.argv = ["train", *argv]
 
-    from src.tiny_shakespeare.gpt.train import main
+    from src.tiny_shakespeare.models.gpt.train import main
 
     main()
     # Modal also commits on container exit; this makes the checkpoint durable before the function returns.

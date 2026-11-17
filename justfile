@@ -4,11 +4,11 @@ test *args:
 
 # Trains and generates from the bigram language model
 bigram *args:
-    uv run --locked -m src.tiny_shakespeare.bigram.train {{args}}
+    uv run --locked -m src.tiny_shakespeare.models.bigram.train {{args}}
 
 # Trains the decoder-only transformer
 gpt-train *args:
-    uv run --locked -m src.tiny_shakespeare.gpt.train {{args}}
+    uv run --locked -m src.tiny_shakespeare.models.gpt.train {{args}}
 
 # Trains the decoder-only transformer on a Modal GPU worker; checkpoints go to the gpt-checkpoints volume
 modal-train *args:
@@ -16,7 +16,7 @@ modal-train *args:
 
 # Generates from a specified training run ID checkpoint
 gpt-generate run_id *args:
-    uv run --locked -m src.tiny_shakespeare.gpt.generate {{run_id}} {{args}}
+    uv run --locked -m src.tiny_shakespeare.models.gpt.generate {{run_id}} {{args}}
 
 # Runs diagnostics on the specified tokenizer and parameters
 # (check merges for BPE-based; check compression ratios, etc)

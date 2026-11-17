@@ -1,6 +1,6 @@
 import torch
 
-from src.tiny_shakespeare.gpt.train import get_batch
+from src.tiny_shakespeare.models.gpt.train import get_batch
 from src.tiny_shakespeare.utils import take_fraction
 
 

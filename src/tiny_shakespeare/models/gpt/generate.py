@@ -2,8 +2,8 @@ import argparse
 
 import torch
 
-from ..tokenizers.utils import make_tokenizer
-from ..utils import get_device, get_tiny_shakespeare_data
+from ...tokenizers.utils import make_tokenizer
+from ...utils import get_device, get_tiny_shakespeare_data
 from .model import load_checkpoint
 
 def parse_args() -> argparse.Namespace:

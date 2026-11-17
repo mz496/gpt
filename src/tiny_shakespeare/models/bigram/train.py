@@ -2,9 +2,9 @@ import math
 
 import torch
 
-from ..tokenizers.char_tokenizer import CharTokenizer
-from ..tokenizers.tokenizer import Tokenizer
-from ..utils import get_device, get_tiny_shakespeare_data
+from ...tokenizers.char_tokenizer import CharTokenizer
+from ...tokenizers.tokenizer import Tokenizer
+from ...utils import get_device, get_tiny_shakespeare_data
 from .model import BigramModel
 
 # --- hyperparameters ---

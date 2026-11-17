@@ -24,7 +24,7 @@ def main():
     args = parser.parse_args()
 
     tokenizer = make_tokenizer(args.tokenizer, args.bpe_vocab_size)
-    # Same train split (and train-only fitting) as gpt/train.py.
+    # Same train split (and train-only fitting) as models/gpt/train.py.
     train_data, _validation_data = get_tiny_shakespeare_data()
     tokenizer.train(train_data)
     tokens = tokenizer.encode_string(train_data)
