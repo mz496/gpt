@@ -7,7 +7,7 @@ From Karpathy's "Let's build the GPT Tokenizer", ~27:46
 """
 
 from pathlib import Path
-from typing import override
+from typing import Any, override
 
 from ..utils import bytes_to_string, string_to_bytes
 from .bpe_utils.bpe_utils import (
@@ -16,6 +16,8 @@ from .bpe_utils.bpe_utils import (
     Merge,
     apply_merges,
     build_vocab,
+    merges_from_state,
+    merges_to_state,
     most_common_pair,
     replace_for_encode,
     unapply_merges,
@@ -32,6 +34,7 @@ class BPETokenizer(Tokenizer):
     Implements a simple byte-pair encoding tokenizer.
     Does passes over the input, merging the most commonly seen byte pairs.
     """
+    name = "bpe"
     NUM_DISTINCT_TOKENS = NUM_BASE_TOKENS
 
     def __init__(self, target_vocab_size: int):
@@ -131,3 +134,17 @@ class BPETokenizer(Tokenizer):
     @override
     def __str__(self) -> str:
         return f"BPETokenizer<merges={self.merges}>"
+
+    @override
+    def state(self) -> dict[str, Any]:
+        # The target is saved rather than derived from the merges, since training can halt before reaching it.
+        return {"target_vocab_size": self.NUM_DISTINCT_TOKENS + self._num_merge_passes, "merges": merges_to_state(self.merges)}
+
+    @classmethod
+    @override
+    def from_state(cls, state: dict[str, Any]) -> "BPETokenizer":
+        tokenizer = cls(state["target_vocab_size"])
+        tokenizer.merges = merges_from_state(state["merges"])
+        tokenizer._merged_token_counter = cls.NUM_DISTINCT_TOKENS + len(tokenizer.merges)
+        tokenizer._vocab = build_vocab(tokenizer.merges)
+        return tokenizer

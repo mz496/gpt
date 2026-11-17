@@ -98,3 +98,13 @@ def build_vocab(merges: list[Merge]) -> dict[int, bytes]:
         a, b = merge.from_tokens
         vocab[merge.to_token] = vocab[a] + vocab[b]
     return vocab
+
+
+def merges_to_state(merges: list[Merge]) -> list[list[int]]:
+    """Merges as [token_a, token_b, merged_token] triples, for saving."""
+    return [[*merge.from_tokens, merge.to_token] for merge in merges]
+
+
+def merges_from_state(state: list[list[int]]) -> list[Merge]:
+    """The inverse of merges_to_state."""
+    return [Merge((a, b), to_token) for a, b, to_token in state]

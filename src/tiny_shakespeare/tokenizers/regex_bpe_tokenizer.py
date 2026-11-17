@@ -4,7 +4,7 @@ Byte-pair encoding that first splits the text into chunks with the GPT-4 regex, 
 
 # Note, this is not the same as python's re.
 import regex as re
-from typing import override
+from typing import Any, override
 
 from ..utils import bytes_to_string, string_to_bytes
 from .bpe_utils.bpe_utils import (
@@ -13,6 +13,8 @@ from .bpe_utils.bpe_utils import (
     Merge,
     apply_merges,
     build_vocab,
+    merges_from_state,
+    merges_to_state,
     most_common_pair,
     replace_for_encode,
     unapply_merges,
@@ -27,6 +29,8 @@ class RegexBPETokenizer(Tokenizer):
     Byte-pair encoding tokenizer that splits the text with GPT4_SPLIT_PATTERN and learns merges within each chunk.
     A pair of tokens is only a merge candidate if they sit next to each other inside the same chunk.
     """
+
+    name = "regex_bpe"
 
     def __init__(self, target_vocab_size: int):
         """
@@ -124,3 +128,20 @@ class RegexBPETokenizer(Tokenizer):
     @override
     def __str__(self) -> str:
         return f"RegexBPETokenizer<merges={self.merges}>"
+
+    @override
+    def state(self) -> dict[str, Any]:
+        # The target is saved rather than derived from the merges, since training can halt before reaching it.
+        # The pattern is saved so that a later change to it can't silently reinterpret old merges.
+        return {"target_vocab_size": NUM_BASE_TOKENS + self._num_merge_passes, "pattern": GPT4_SPLIT_PATTERN, "merges": merges_to_state(self.merges)}
+
+    @classmethod
+    @override
+    def from_state(cls, state: dict[str, Any]) -> "RegexBPETokenizer":
+        if state["pattern"] != GPT4_SPLIT_PATTERN:
+            raise ValueError("the saved tokenizer was trained with a different split pattern than GPT4_SPLIT_PATTERN")
+        tokenizer = cls(state["target_vocab_size"])
+        tokenizer.merges = merges_from_state(state["merges"])
+        tokenizer._merged_token_counter = NUM_BASE_TOKENS + len(tokenizer.merges)
+        tokenizer._vocab = build_vocab(tokenizer.merges)
+        return tokenizer

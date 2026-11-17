@@ -51,6 +51,9 @@ from pathlib import Path
 import torch
 from torch.nn import LayerNorm, functional as F
 
+from ...tokenizers.tokenizer import Tokenizer
+from ...tokenizers.utils import load_tokenizer
+
 @dataclass(frozen=True)
 class GPTConfig:
     """
@@ -504,24 +507,28 @@ class GPT(torch.nn.Module):
 def checkpoint_path(run_id: str) -> Path:
     return Path("checkpoints") / run_id / "model.pt"
 
-def save_checkpoint(model: GPT, run_id: str, tokenizer_name: str, bpe_vocab_size: int) -> Path:
+def checkpoint_tokenizer_path(run_id: str) -> Path:
+    return checkpoint_path(run_id).with_name("tokenizer.json")
+
+def save_checkpoint(model: GPT, run_id: str, tokenizer: Tokenizer) -> Path:
     """
-    torch.save s the model's config, state_dict, and tokenizer settings to checkpoints/<run_id>/model.pt and returns that path.
+    torch.save s the model's config and state_dict to checkpoints/<run_id>/model.pt and returns that path.
+    The trained tokenizer is saved next to it as tokenizer.json, so the checkpoint can decode its own output without the training data.
     """
     path = checkpoint_path(run_id)
     path.parent.mkdir(parents=True, exist_ok=True)
+    # Written first, so a model.pt that exists always has its tokenizer.json
+    tokenizer.save(checkpoint_tokenizer_path(run_id))
     torch.save({
         "config": asdict(model.config),
         "state_dict": model.state_dict(),
-        "tokenizer": {"name": tokenizer_name, "bpe_vocab_size": bpe_vocab_size},
     }, path)
     return path
 
-def load_checkpoint(run_id: str, device: str) -> tuple[GPT, str, int]:
+def load_checkpoint(run_id: str, device: str) -> GPT:
     """
     Reads the checkpoint written by save_checkpoint into a fresh model on `device`, in eval mode.
     The architecture comes from the config saved in the checkpoint.
-    Returns (model, tokenizer_name, bpe_vocab_size). Checkpoints from before tokenizers were saved are treated as "char".
     """
     path = checkpoint_path(run_id)
     if not path.is_file():
@@ -530,5 +537,14 @@ def load_checkpoint(run_id: str, device: str) -> tuple[GPT, str, int]:
     model = GPT(GPTConfig(**saved["config"])).to(device)
     model.load_state_dict(saved["state_dict"])
     model.eval()
-    tokenizer = saved.get("tokenizer", {"name": "char", "bpe_vocab_size": 0})
-    return model, tokenizer["name"], tokenizer["bpe_vocab_size"]
+    return model
+
+def load_checkpoint_tokenizer(run_id: str) -> Tokenizer:
+    """
+    The trained tokenizer saved with the checkpoint by save_checkpoint.
+    Raises if the checkpoint has none: there is no way to decode its output without retraining it.
+    """
+    path = checkpoint_tokenizer_path(run_id)
+    if not path.is_file():
+        raise FileNotFoundError(f"checkpoint {run_id} has no tokenizer: {path} not found")
+    return load_tokenizer(path)

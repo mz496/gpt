@@ -2,10 +2,8 @@ import argparse
 
 import torch
 
-from ...tokenizers.utils import make_tokenizer
-from ...data.loader import get_tokenizer_text
 from ...utils import get_device
-from .model import load_checkpoint
+from .model import load_checkpoint, load_checkpoint_tokenizer
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate text from a trained run's checkpoint")
@@ -19,11 +17,9 @@ def main():
     device = get_device()
     print(f"available device: {device}")
 
-    model, tokenizer_name, bpe_vocab_size = load_checkpoint(args.run_id, device)
-    # The tokenizer is retrained on the data, which is deterministic for both tokenizers.
-    # This must match train.py, which fits the tokenizer on the train split only.
-    tokenizer = make_tokenizer(tokenizer_name, bpe_vocab_size)
-    tokenizer.train(get_tokenizer_text("tiny-shakespeare"))
+    model = load_checkpoint(args.run_id, device)
+    # Raises if the checkpoint has no tokenizer.
+    tokenizer = load_checkpoint_tokenizer(args.run_id)
     if len(tokenizer.get_vocab()) != model.config.vocab_size:
         raise ValueError(f"vocab size {len(tokenizer.get_vocab())} does not match the checkpoint's {model.config.vocab_size}")
 

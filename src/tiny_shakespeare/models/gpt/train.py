@@ -7,8 +7,9 @@ import torch
 import wandb
 
 from ...config import CONFIG_NAMES, TrainConfig, load_config
-from ...data.loader import get_batch, get_tokenizer_text
+from ...data.loader import get_batch
 from ...data.prepare import prepare
+from ...data.tiny_shakespeare_source import TinyShakespeareSource
 from ...timer import PhaseTimer
 from ...tokenizers.utils import TOKENIZER_NAMES, make_tokenizer
 from ...utils import bits_per_char, get_device, timestamp
@@ -134,6 +135,7 @@ def main():
     # Coarse timings of everything around the training loop (data, tokenizer, wandb, checkpoint)
     setup_timer = PhaseTimer()
 
+    source = TinyShakespeareSource()
     tokenizer = make_tokenizer(args.tokenizer, args.bpe_vocab_size)
     # NOTE: By using only train data for the tokenization:
     # - CharTokenizer technically could fail when asked to encode the validation set, since the tokenizer only knows about chars in the train set.
@@ -141,7 +143,7 @@ def main():
     #   - (This is because it's not a true byte-level tokenizer; ie roughly just A-Z + a-z + punctuation and not all 256 bytes).
     # - This is mostly to make BPETokenizer/RegexBPETokenizer losses more accurate since they learn their frequencies/merges only on train.
     with setup_timer.phase("tokenizer_train"):
-        tokenizer.train(get_tokenizer_text("tiny-shakespeare"))
+        tokenizer.train(source.get_tokenizer_text())
 
     device = get_device()
     print(f"available device: {device}")
@@ -161,7 +163,7 @@ def main():
     with setup_timer.phase("build_model"):
         model = GPT(config, flag_use_pytorch_attention_impl=cfg.flag_use_pytorch_attention_impl).to(device)
     with setup_timer.phase("tokenize_data"):
-        data = prepare("tiny-shakespeare", tokenizer)
+        data = prepare(source, tokenizer)
 
     name = timestamp()
     if args.suffix:
@@ -181,7 +183,7 @@ def main():
         model = train(cfg, cfg.train_steps, model, data.train, data.validation, device, data.train_chars, data.validation_chars, run, train_timer, dtype)
 
     with setup_timer.phase("save_checkpoint"):
-        checkpoint_path = save_checkpoint(model, run_id, args.tokenizer, args.bpe_vocab_size)
+        checkpoint_path = save_checkpoint(model, run_id, tokenizer)
     print(f"saved checkpoint to {checkpoint_path}")
     
     with setup_timer.phase("wandb_finish"):
