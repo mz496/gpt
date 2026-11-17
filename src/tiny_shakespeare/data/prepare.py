@@ -18,8 +18,7 @@ def encode_split(source: DataSource, split: Split, tokenizer: Tokenizer, dtype: 
     """
     Tokenizes one split chunk by chunk. Returns the token ids and the number of chars they came from.
 
-    Tokens never span chunks, so for a BPE tokenizer a chunk boundary can change the tokens near it versus encoding the whole split at once.
-    This is why chunks end between documents (see DataSource.iter_text).
+    Tokens never span chunks, so for a BPE tokenizer a chunk boundary in the middle of text can change the tokens near it versus encoding the whole split at once.
     """
     arrays: list[np.ndarray[Any, Any]] = []
     num_chars = 0

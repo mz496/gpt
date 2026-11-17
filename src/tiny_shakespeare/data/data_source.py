@@ -22,8 +22,7 @@ class DataSource(ABC):
         The text of one split as consecutive chunks of raw text. Concatenating the chunks gives the whole split.
         The chunks contain the special tokens as they appear in the data.
 
-        A chunk never ends in the middle of a document, so tokenizing chunk by chunk can't split a document in two.
-        Nor does it end in the middle of a special token. A source whose documents are separated by a special token cuts right after one.
+        A chunk may end in the middle of a document, but never in the middle of a special token.
         """
 
     def get_tokenizer_text(self, max_chars: int = TOKENIZER_TEXT_MAX_CHARS) -> str:
@@ -35,7 +34,7 @@ class DataSource(ABC):
 
 def _take_chars(chunks: Iterable[str], max_chars: int) -> str:
     """
-    Concatenates chunks until at least max_chars chars have been collected; the chunk that crosses the cap is kept whole, so documents aren't cut in half.
+    Concatenates chunks until at least max_chars chars have been collected; the chunk that crosses the cap is kept whole.
     """
     if max_chars <= 0:
         return ""
