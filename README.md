@@ -285,3 +285,19 @@ Now going to try varying how much data we have:
 Simply porting the run to modal on the default config - we get from ~40-43s to ~14s on a T4 GPU on modal, using `modal_train.py` on [19f8e30](https://github.com/mz496/gpt/blob/19f8e30) using `just modal-train --tokenizer char --profile`
 
 Going back to the `scaleup` config yields actual GPU usage which is good too (`just modal-train --config scaleup --tokenizer char --profile`), and then making the train loop mixed-precision (bf16) also took the train loop from ~15m to ~3.5m on the scaleup config.
+
+
+### Nov 18
+
+Upgraded the training to take larger datasets like TinyStories (3GB); now it doesn't overfit anymore! Not being super precise here, 
+
+Using a command `MODAL_GPU=A100 just compare-tokenizers-scaleup --modal --max-parallel 2 --train-args --source tiny-stories` for about 10 minutes on [24a7228](https://github.com/mz496/gpt/blob/24a7228):
+
+![](assets/2026-11-18-tinystories-init.png)
+
+```
+.
+Sue had a big box. The fit was a shoe called out, "Look, little bug!" she said. "I just every. Let's go fastake our friend," they said.
+They went to the house and opened it at the box. It was a silly giant, and a fairy. She could not open the box. Lily and her friend were bad. They learned that she should always have dirty from well things. And they all played together and played together.
+<|endoftext|>
+```
