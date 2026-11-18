@@ -289,11 +289,18 @@ Going back to the `scaleup` config yields actual GPU usage which is good too (`j
 
 ### Nov 18
 
-Upgraded the training to take larger datasets like TinyStories (3GB); now it doesn't overfit anymore! Not being super precise here, 
+Upgraded the training to take larger datasets like TinyStories (3GB); now it doesn't overfit anymore and shows the expected loss curves:
+- loss in bits-per-char monotonically decreasing on both train and validation for all methods
+- the `char` tokenizer is the worst
+- the `regex_bpe` tokenizer improves (in a diminishing-returns way) as we increase the vocab size
 
-Using a command `MODAL_GPU=A100 just compare-tokenizers-scaleup --modal --max-parallel 2 --train-args --source tiny-stories` for about 10 minutes on [24a7228](https://github.com/mz496/gpt/blob/24a7228):
+Note that the tokenization uses a small fraction of the train data (the first `TOKENIZER_TEXT_MAX_CHARS = 1_000_000` chars) in order to keep it fast, but the train and validation run on the full sets.
 
-![](assets/2026-11-18-tinystories-init.png)
+Using a command `MODAL_GPU=A100 just compare-tokenizers-scaleup --modal --tokenizers char regex_bpe --max-parallel 5 --train-args --source tiny-stories` for about 10 minutes on [af36e79](https://github.com/mz496/gpt/blob/af36e79):
+
+![](assets/2026-11-18-tinystories-compare.png)
+
+Here's a sample of a generation from the regex-bpe tokenizer with vocab size 2048, with validation loss ~0.9:
 
 ```
 .
