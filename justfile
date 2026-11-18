@@ -26,6 +26,10 @@ modal-prewarm-check:
 gpt-generate run_id *args:
     uv run --locked -m src.tiny_shakespeare.models.gpt.generate {{run_id}} {{args}}
 
+# Generates from a training run ID checkpoint on a Modal worker, reading it from the gpt-checkpoints volume
+modal-generate run_id *args:
+    uv run --locked modal run scripts/modal_generate.py --run-id {{run_id}} --args "{{args}}"
+
 # Runs diagnostics on the specified tokenizer and parameters
 # (check merges for BPE-based; check compression ratios, etc)
 tokenize-check *args:

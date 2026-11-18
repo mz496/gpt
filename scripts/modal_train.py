@@ -5,9 +5,10 @@ Runs src.tiny_shakespeare.models.gpt.train on a Modal GPU worker. Arguments are 
 
 (which runs modal run scripts/modal_train.py --args "--config default ...")
 
-Checkpoints are written to the "gpt-checkpoints" Modal volume as <run_id>/model.pt. To use one locally:
+Checkpoints are written to the "gpt-checkpoints" Modal volume as checkpoints/<run_id>/model.pt and tokenizer.json.
+Generate from one on Modal with `just modal-generate <run_id>` (scripts/modal_generate.py). To use one locally, download the checkpoints/<run_id> directory:
 
-    uv run modal volume get gpt-checkpoints <run_id>/model.pt checkpoints/<run_id>/model.pt
+    uv run modal volume get gpt-checkpoints checkpoints/<run_id> <local dir>   # check where the files land: generate needs them in checkpoints/<run_id>/
 
 Needs a Modal secret named "wandb" containing WANDB_API_KEY:
 
@@ -20,15 +21,14 @@ import sys
 
 import modal
 
-from modal_constants import DATA_DIR, DATA_VOLUME_NAME, HF_HOME
+from modal_constants import CHECKPOINT_DIR, CHECKPOINT_VOLUME_NAME, DATA_DIR, DATA_VOLUME_NAME, HF_HOME
 
 # Set MODAL_GPU="" to run on CPU (GPU functions need a payment method on the Modal account).
 # https://modal.com/docs/guide/gpu
 GPU = os.environ.get("MODAL_GPU", "L4") or None
-CHECKPOINT_DIR = "/vol"
 
 app = modal.App("gpt-train")
-volume = modal.Volume.from_name("gpt-checkpoints", create_if_missing=True)
+volume = modal.Volume.from_name(CHECKPOINT_VOLUME_NAME, create_if_missing=True)
 # Writable, so that a dataset that wasn't prewarmed is downloaded into the volume once rather than on every run.
 data_volume = modal.Volume.from_name(DATA_VOLUME_NAME, create_if_missing=True)
 image = (
