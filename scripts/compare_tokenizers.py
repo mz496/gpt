@@ -88,14 +88,18 @@ def log(message: str) -> None:
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {message}", flush=True)
 
 
-def train(spec: RunSpec, group: str, log_dir: Path, config: str | None = None, modal: bool = False) -> str:
-    """Trains one run (locally, or on Modal if `modal`), writing its output to a log file. Returns the wandb run id. Raises if training fails."""
+def training_command(spec: RunSpec, group: str, config: str | None = None, modal: bool = False) -> list[str]:
+    """The command that trains one run, locally or (if `modal`) on Modal. The spec's extra_args come last."""
     command = ["just", "modal-train" if modal else "gpt-train", "--tokenizer", spec.tokenizer, "--group", group]
     if config is not None:
         command += ["--config", config]
     if spec.bpe_vocab_size is not None:
         command += ["--bpe-vocab-size", str(spec.bpe_vocab_size)]
-    command += spec.extra_args
+    return command + spec.extra_args
+
+def train(spec: RunSpec, group: str, log_dir: Path, config: str | None = None, modal: bool = False) -> str:
+    """Trains one run (locally, or on Modal if `modal`), writing its output to a log file. Returns the wandb run id. Raises if training fails."""
+    command = training_command(spec, group, config, modal)
     log_path = log_dir / f"{spec.label}.log"
     log(f"{spec.label}: training started (output in {log_path})")
     start = time.monotonic()
