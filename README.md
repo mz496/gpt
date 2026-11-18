@@ -7,7 +7,17 @@
 > 2. [here] Transformers (attention; tokenization; finetuning)
 > 3. [[repo]](https://github.com/mz496/rl) Reinforcement learning (classical; RLHF; RLVR)
 
-Following Karpathy's [https://karpathy.ai/zero-to-hero.html](https://karpathy.ai/zero-to-hero.html) -> Let's build GPT
+| Validation loss in bits-per-char | Generation from TinyStories |
+| --- | --- |
+| ![](assets/2026-11-18-tinystories-val-loss-hero.png) | ![](assets/2026-11-18-tinystories-generate.png) |
+ 
+
+What I did:
+- I started with Karpathy's [Let's build GPT](https://www.youtube.com/watch?v=kCc8FmEb1nY) video.
+- I then followed his followup to implement a super simple character tokenizer and a character-level byte-pair encoding tokenizer in [Let's build the GPT Tokenizer](https://www.youtube.com/watch?v=zduSFxRajkE).
+- He then goes on to describe a regex-based-splitting approach that GPT-4 uses; I implement that at a few different vocab sizes.
+- I try it out on the [tiny-shakespeare](https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt) dataset, but it overfits.
+- I then try it out on the [TinyStoriesV2](https://huggingface.co/datasets/roneneldan/TinyStories/blob/main/TinyStoriesV2-GPT4-train.txt) dataset and watch performance improve as expected.
 
 ## Lab notebook
 
