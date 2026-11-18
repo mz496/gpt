@@ -1,3 +1,5 @@
+import pytest
+
 from scripts.compare_tokenizers import training_command
 from scripts.compare_tokenizers_scaleup import CONFIG, build_specs, parse_args
 from src.tiny_shakespeare.config import CONFIG_NAMES
@@ -53,4 +55,16 @@ def test_the_training_commands_end_with_the_train_args_on_modal():
 def test_the_training_commands_run_locally_without_modal():
     (char, _regex) = build_specs(["--source", "tiny-stories"])
     assert training_command(char, "g")[:2] == ["just", "gpt-train"]
+
+
+def test_parse_args_rejects_the_flags_the_script_sets_per_run(capsys: pytest.CaptureFixture[str]):
+    with pytest.raises(SystemExit) as exit_info:
+        parse_args(["--modal", "--train-args", "--tokenizer", "bpe"])
+
+    assert exit_info.value.code == 2
+    assert "--tokenizer is set per run by this script" in capsys.readouterr().err
+
+
+def test_parse_args_accepts_the_tinystories_flags():
+    assert parse_args(["--train-args", "--source", "tiny-stories", "--tokenizer-text-only"]).train_args == ["--source", "tiny-stories", "--tokenizer-text-only"]
 

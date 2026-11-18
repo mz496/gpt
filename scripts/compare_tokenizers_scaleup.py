@@ -19,12 +19,13 @@ Arguments:
     --project PROJECT     wandb project (default: gpt-experiments)
     --log-dir DIR         where each run's training output goes (default: a fresh temp dir, printed at start)
     --train-args ...      everything after this is passed to both trainings, e.g. --source tiny-stories --tokenizer-text-only. Put it last.
+                          Not --tokenizer, --bpe-vocab-size, --group or --config, which this script sets for each run.
 """
 
 import argparse
 from pathlib import Path
 
-from scripts.compare_tokenizers import AMBER_600, INDIGO_300_TO_600, RunSpec, run_comparison
+from scripts.compare_tokenizers import AMBER_600, INDIGO_300_TO_600, RunSpec, add_train_args_option, reject_reserved_train_args, run_comparison
 from scripts.wandb_views import DEFAULT_PROJECT, resolve_entity
 
 CONFIG = "scaleup"
@@ -54,9 +55,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--entity", default=None)
     parser.add_argument("--project", default=DEFAULT_PROJECT)
     parser.add_argument("--log-dir", type=Path, default=None)
-    # REMAINDER rather than one quoted string, so that it also works through `just`, which pastes its arguments into the command unquoted.
-    parser.add_argument("--train-args", nargs=argparse.REMAINDER, default=[], help="everything after this is passed to both trainings, e.g. --train-args --source tiny-stories --tokenizer-text-only (put it last)")
-    return parser.parse_args(argv)
+    add_train_args_option(parser)
+    args = parser.parse_args(argv)
+    reject_reserved_train_args(parser, args.train_args)
+    return args
 
 
 def main():

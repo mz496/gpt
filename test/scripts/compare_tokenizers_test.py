@@ -1,6 +1,15 @@
 import pytest
 
-from scripts.compare_tokenizers import INDIGO_300_TO_600, AMBER_600, LIME_300_TO_600, build_specs, parse_wandb_run_id, shade_for
+from scripts.compare_tokenizers import (
+    AMBER_600,
+    INDIGO_300_TO_600,
+    LIME_300_TO_600,
+    build_specs,
+    parse_args,
+    parse_wandb_run_id,
+    shade_for,
+    training_command,
+)
 
 
 def test_shade_for_spans_the_palette():
@@ -30,3 +39,68 @@ def test_parse_wandb_run_id():
 def test_parse_wandb_run_id_missing():
     with pytest.raises(ValueError):
         parse_wandb_run_id("no id here")
+
+
+def test_build_specs_has_no_extra_training_args_by_default():
+    assert all(spec.extra_args == [] for spec in build_specs([300, 512]))
+
+
+def test_build_specs_gives_every_run_the_train_args_without_sharing_the_list():
+    specs = build_specs([300, 512], ["--source", "tiny-stories"])
+    assert len(specs) == 5
+    assert all(spec.extra_args == ["--source", "tiny-stories"] for spec in specs)
+    assert len({id(spec.extra_args) for spec in specs}) == len(specs)
+
+
+def test_parse_args_defaults():
+    args = parse_args([])
+    assert args.modal is False
+    assert args.train_args == []
+    assert args.sizes == [300, 512, 1024, 2048]
+    assert args.max_parallel == 3
+
+
+def test_parse_args_train_args_takes_everything_after_it_including_flags():
+    args = parse_args(["--modal", "--sizes", "512", "2048", "--max-parallel", "2", "--train-args", "--source", "tiny-stories", "--tokenizer-text-only"])
+    assert args.modal is True
+    assert args.sizes == [512, 2048]
+    assert args.max_parallel == 2
+    assert args.train_args == ["--source", "tiny-stories", "--tokenizer-text-only"]
+
+
+@pytest.mark.parametrize("train_args", [
+    ["--tokenizer", "bpe"],
+    ["--tokenizer=bpe"],
+    ["--bpe-vocab-size", "512"],
+    ["--bpe", "512"],  # an abbreviation that argparse would accept for --bpe-vocab-size
+    ["--group", "x"],
+    ["--config", "scaleup"],
+    ["--c", "scaleup"],  # an abbreviation of --config
+    ["--source", "tiny-stories", "--tokenizer", "bpe"],
+])
+def test_parse_args_rejects_the_flags_the_script_sets_per_run(train_args: list[str], capsys: pytest.CaptureFixture[str]):
+    with pytest.raises(SystemExit) as exit_info:
+        parse_args(["--train-args", *train_args])
+
+    assert exit_info.value.code == 2
+    assert "is set per run by this script" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("train_args", [
+    ["--tokenizer-text-only"],
+    ["--source", "tiny-stories"],
+    ["--precision", "fp32", "--profile"],
+    ["--suffix", "x"],
+])
+def test_parse_args_accepts_other_training_flags(train_args: list[str]):
+    assert parse_args(["--train-args", *train_args]).train_args == train_args
+
+
+def test_the_training_command_has_the_extra_args_last_and_works_locally_or_on_modal():
+    char, regex_bpe = build_specs([2048], ["--source", "tiny-stories"])[0], build_specs([2048], ["--source", "tiny-stories"])[2]
+
+    assert training_command(char, "g") == ["just", "gpt-train", "--tokenizer", "char", "--group", "g", "--source", "tiny-stories"]
+    assert training_command(regex_bpe, "g", modal=True) == [
+        "just", "modal-train", "--tokenizer", "regex_bpe", "--group", "g", "--bpe-vocab-size", "2048", "--source", "tiny-stories",
+    ]
+

@@ -8,6 +8,7 @@ with the shade rising with vocab size).
 Usage (from the repo root, with wandb logged in):
     just compare-tokenizers
     just compare-tokenizers --sizes 300 512 --max-parallel 2 --entity my-team
+    just compare-tokenizers --modal --sizes 512 2048 --train-args --source tiny-stories --tokenizer-text-only
     uv run --locked -m scripts.compare_tokenizers --help
 
 Arguments:
@@ -17,6 +18,9 @@ Arguments:
     --entity ENTITY       wandb entity (default: your default entity)
     --project PROJECT     wandb project (default: gpt-experiments)
     --log-dir DIR         where each run's training output goes (default: a fresh temp dir, printed at start)
+    --modal               train on Modal (`just modal-train`) instead of locally; the wandb view is still built locally
+    --train-args ...      everything after this is passed to every training, e.g. --source tiny-stories --tokenizer-text-only. Put it last.
+                          Not --tokenizer, --bpe-vocab-size, --group or --config, which this script sets for each run.
 
 The wandb runs are also tagged with the view name as their wandb group.
 Runs are trained in parallel (up to --max-parallel), then added to the view in a single edit afterwards.
@@ -44,6 +48,23 @@ LIME_300_TO_600 =["bef264", "a3e635", "84cc16", "65a30d"]
 INDIGO_600 = "4f46e5"
 INDIGO_300_TO_600 =["a5b4fc", "818cf8", "6366f1", "4f46e5"]
 
+# The training flags these scripts set themselves for every run; passing them in --train-args would silently override the run's own.
+RESERVED_TRAIN_FLAGS = ("--tokenizer", "--bpe-vocab-size", "--group", "--config")
+
+
+def add_train_args_option(parser: argparse.ArgumentParser) -> None:
+    # REMAINDER rather than one quoted string, so that it also works through `just`, which pastes its arguments into the command unquoted.
+    parser.add_argument("--train-args", nargs=argparse.REMAINDER, default=[], help="everything after this is passed to each training, e.g. --train-args --source tiny-stories --tokenizer-text-only (put it last)")
+
+
+def reject_reserved_train_args(parser: argparse.ArgumentParser, train_args: list[str]) -> None:
+    """Exits with an error if train_args has a flag that the script sets per run, also as the abbreviation or --flag=value that argparse would accept."""
+    for arg in train_args:
+        name = arg.split("=", 1)[0]
+        for reserved in RESERVED_TRAIN_FLAGS:
+            if name.startswith("--") and len(name) > 2 and reserved.startswith(name):
+                parser.error(f"{reserved} is set per run by this script; remove {arg!r} from --train-args")
+
 
 @dataclass
 class RunSpec:
@@ -62,8 +83,9 @@ def shade_for(index: int, count: int, shades: list[str]) -> str:
     return shades[position]
 
 
-def build_specs(sizes: list[int]) -> list[RunSpec]:
-    specs = [RunSpec("char", "char", None, AMBER_600, "tokenizer=char")]
+def build_specs(sizes: list[int], train_args: list[str] | None = None) -> list[RunSpec]:
+    """The runs: char, then bpe and regex_bpe at each size. `train_args` are extra arguments for the training of each, e.g. ["--source", "tiny-stories"]."""
+    specs = [RunSpec("char", "char", None, AMBER_600, "tokenizer=char", extra_args=list(train_args or []))]
     for i, size in enumerate(sizes):
         for tokenizer, shades in [("bpe", LIME_300_TO_600), ("regex_bpe", INDIGO_300_TO_600)]:
             specs.append(RunSpec(
@@ -72,6 +94,7 @@ def build_specs(sizes: list[int]) -> list[RunSpec]:
                 bpe_vocab_size=size,
                 color=shade_for(i, len(sizes), shades),
                 display_name=f"tokenizer={tokenizer} | bpe_vocab_size={size}",
+                extra_args=list(train_args or []),
             ))
     return specs
 
@@ -172,17 +195,25 @@ def run_comparison(
         raise SystemExit(1)
 
 
-def main():
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train and compare tokenizers, collected in one wandb view.")
     parser.add_argument("--name", default="tokenizers-test")
     parser.add_argument("--sizes", type=int, nargs="+", default=[300, 512, 1024, 2048])
     parser.add_argument("--max-parallel", type=int, default=3, help="cap on trainings running at once")
+    parser.add_argument("--modal", action="store_true", help="train on Modal instead of locally")
     parser.add_argument("--entity", default=None)
     parser.add_argument("--project", default=DEFAULT_PROJECT)
     parser.add_argument("--log-dir", type=Path, default=None)
-    args = parser.parse_args()
+    add_train_args_option(parser)
+    args = parser.parse_args(argv)
+    reject_reserved_train_args(parser, args.train_args)
+    return args
 
-    run_comparison(build_specs(args.sizes), args.name, resolve_entity(args.entity), args.project, args.max_parallel, args.log_dir)
+
+def main():
+    args = parse_args()
+
+    run_comparison(build_specs(args.sizes, args.train_args), args.name, resolve_entity(args.entity), args.project, args.max_parallel, args.log_dir, modal=args.modal)
 
 
 if __name__ == "__main__":
