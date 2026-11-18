@@ -104,3 +104,37 @@ def test_the_training_command_has_the_extra_args_last_and_works_locally_or_on_mo
         "just", "modal-train", "--tokenizer", "regex_bpe", "--group", "g", "--bpe-vocab-size", "2048", "--source", "tiny-stories",
     ]
 
+
+def test_build_specs_defaults_to_every_tokenizer():
+    assert build_specs([300, 512], tokenizers=None) == build_specs([300, 512], tokenizers=["char", "bpe", "regex_bpe"])
+
+
+def test_build_specs_with_char_and_regex_bpe_leaves_out_bpe():
+    specs = build_specs([300, 512, 1024, 2048], tokenizers=["char", "regex_bpe"])
+    assert [spec.label for spec in specs] == ["char", "regex_bpe_300", "regex_bpe_512", "regex_bpe_1024", "regex_bpe_2048"]
+
+
+def test_build_specs_with_only_regex_bpe_has_no_char():
+    assert [spec.label for spec in build_specs([512], tokenizers=["regex_bpe"])] == ["regex_bpe_512"]
+
+
+def test_the_colors_do_not_depend_on_which_tokenizers_are_picked():
+    everything = {spec.label: (spec.color, spec.display_name) for spec in build_specs([300, 512, 1024, 2048])}
+    subset = {spec.label: (spec.color, spec.display_name) for spec in build_specs([300, 512, 1024, 2048], tokenizers=["char", "regex_bpe"])}
+
+    assert subset and all(everything[label] == value for label, value in subset.items())
+    assert subset["char"][0] == AMBER_600
+    assert subset["regex_bpe_2048"][0] == INDIGO_300_TO_600[-1]
+
+
+def test_parse_args_tokenizers_defaults_to_all_and_takes_several():
+    assert parse_args([]).tokenizers == ["char", "bpe", "regex_bpe"]
+    assert parse_args(["--tokenizers", "char", "regex_bpe", "--max-parallel", "5"]).tokenizers == ["char", "regex_bpe"]
+
+
+def test_parse_args_rejects_an_unknown_tokenizer(capsys: pytest.CaptureFixture[str]):
+    with pytest.raises(SystemExit) as exit_info:
+        parse_args(["--tokenizers", "wordpiece"])
+    assert exit_info.value.code == 2
+    assert "invalid choice" in capsys.readouterr().err
+

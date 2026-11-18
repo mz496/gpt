@@ -8,12 +8,14 @@ with the shade rising with vocab size).
 Usage (from the repo root, with wandb logged in):
     just compare-tokenizers
     just compare-tokenizers --sizes 300 512 --max-parallel 2 --entity my-team
+    just compare-tokenizers --tokenizers char regex_bpe
     just compare-tokenizers --modal --sizes 512 2048 --train-args --source tiny-stories --tokenizer-text-only
     uv run --locked -m scripts.compare_tokenizers --help
 
 Arguments:
     --name NAME           view name suffix; the view is named "<timestamp>_<NAME>" (default: tokenizers-test)
     --sizes N [N ...]     bpe_vocab_size values for bpe and regex_bpe (default: 300 512 1024 2048)
+    --tokenizers T [T ...]  which of char, bpe, regex_bpe to train (default: all three). The colors are the same whichever you pick.
     --max-parallel N      CAP on trainings running at once (default: 3). Others wait for a free slot.
     --entity ENTITY       wandb entity (default: your default entity)
     --project PROJECT     wandb project (default: gpt-experiments)
@@ -47,6 +49,8 @@ LIME_600 = "65a30d"
 LIME_300_TO_600 =["bef264", "a3e635", "84cc16", "65a30d"]
 INDIGO_600 = "4f46e5"
 INDIGO_300_TO_600 =["a5b4fc", "818cf8", "6366f1", "4f46e5"]
+
+TOKENIZER_KINDS = ["char", "bpe", "regex_bpe"]
 
 # The training flags these scripts set themselves for every run; passing them in --train-args would silently override the run's own.
 RESERVED_TRAIN_FLAGS = ("--tokenizer", "--bpe-vocab-size", "--group", "--config")
@@ -83,11 +87,20 @@ def shade_for(index: int, count: int, shades: list[str]) -> str:
     return shades[position]
 
 
-def build_specs(sizes: list[int], train_args: list[str] | None = None) -> list[RunSpec]:
-    """The runs: char, then bpe and regex_bpe at each size. `train_args` are extra arguments for the training of each, e.g. ["--source", "tiny-stories"]."""
-    specs = [RunSpec("char", "char", None, AMBER_600, "tokenizer=char", extra_args=list(train_args or []))]
+def build_specs(sizes: list[int], train_args: list[str] | None = None, tokenizers: list[str] | None = None) -> list[RunSpec]:
+    """
+    The runs: char, then bpe and regex_bpe at each size; `tokenizers` picks which of those kinds (default: all).
+    `train_args` are extra arguments for the training of each, e.g. ["--source", "tiny-stories"].
+    A run's color depends only on its tokenizer and size, so it's the same whichever tokenizers are picked.
+    """
+    kinds = tokenizers or TOKENIZER_KINDS
+    specs: list[RunSpec] = []
+    if "char" in kinds:
+        specs.append(RunSpec("char", "char", None, AMBER_600, "tokenizer=char", extra_args=list(train_args or [])))
     for i, size in enumerate(sizes):
         for tokenizer, shades in [("bpe", LIME_300_TO_600), ("regex_bpe", INDIGO_300_TO_600)]:
+            if tokenizer not in kinds:
+                continue
             specs.append(RunSpec(
                 label=f"{tokenizer}_{size}",
                 tokenizer=tokenizer,
@@ -195,10 +208,11 @@ def run_comparison(
         raise SystemExit(1)
 
 
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None, default_name: str = "tokenizers-test") -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train and compare tokenizers, collected in one wandb view.")
-    parser.add_argument("--name", default="tokenizers-test")
+    parser.add_argument("--name", default=default_name)
     parser.add_argument("--sizes", type=int, nargs="+", default=[300, 512, 1024, 2048])
+    parser.add_argument("--tokenizers", nargs="+", choices=TOKENIZER_KINDS, default=list(TOKENIZER_KINDS), help="which tokenizers to train")
     parser.add_argument("--max-parallel", type=int, default=3, help="cap on trainings running at once")
     parser.add_argument("--modal", action="store_true", help="train on Modal instead of locally")
     parser.add_argument("--entity", default=None)
@@ -213,7 +227,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main():
     args = parse_args()
 
-    run_comparison(build_specs(args.sizes, args.train_args), args.name, resolve_entity(args.entity), args.project, args.max_parallel, args.log_dir, modal=args.modal)
+    run_comparison(build_specs(args.sizes, args.train_args, args.tokenizers), args.name, resolve_entity(args.entity), args.project, args.max_parallel, args.log_dir, modal=args.modal)
 
 
 if __name__ == "__main__":
