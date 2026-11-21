@@ -13,11 +13,11 @@
  
 
 What I did:
-- I started with Karpathy's [Let's build GPT](https://www.youtube.com/watch?v=kCc8FmEb1nY) video.
-- I then followed his followup to implement a super simple character tokenizer and a character-level byte-pair encoding tokenizer in [Let's build the GPT Tokenizer](https://www.youtube.com/watch?v=zduSFxRajkE).
-- He then goes on to describe a regex-based-splitting approach that GPT-4 uses; I implement that at a few different vocab sizes.
+- I started by implementing the decoder-only transformer by hand, following Karpathy's [Let's build GPT](https://www.youtube.com/watch?v=kCc8FmEb1nY) video.
+- I then implemented a simple character tokenizer and a character-level byte-pair encoding tokenizer by hand, following Karpathy's [Let's build the GPT Tokenizer](https://www.youtube.com/watch?v=zduSFxRajkE).
+- He then goes on to describe a regex-based-splitting approach that GPT-4 uses; I implement that by hand as well at a few different vocab sizes.
 - I try it out on the [tiny-shakespeare](https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt) dataset, but it overfits.
-- I then try it out on the [TinyStoriesV2](https://huggingface.co/datasets/roneneldan/TinyStories/blob/main/TinyStoriesV2-GPT4-train.txt) dataset and watch performance improve as expected.
+- Following some AI refactors, I then try it out on the [TinyStoriesV2](https://huggingface.co/datasets/roneneldan/TinyStories/blob/main/TinyStoriesV2-GPT4-train.txt) dataset and watch performance improve as expected as BPE vocab size increases (the graph on the left above).
 
 ## Lab notebook
 
@@ -318,3 +318,12 @@ Sue had a big box. The fit was a shoe called out, "Look, little bug!" she said. 
 They went to the house and opened it at the box. It was a silly giant, and a fairy. She could not open the box. Lily and her friend were bad. They learned that she should always have dirty from well things. And they all played together and played together.
 <|endoftext|>
 ```
+
+### Nov 19
+
+1. Retrain on char tokenizer
+2. Prepare data: generate the examples, tokenize them, and produce tokens, loss_mask and example_starts.
+3. Write get_sft_batch (window starts at example boundaries, targets masked with -100).
+4. Update train and make_eval_batches to take a batch function, and drop the bits-per-char logging for this path.
+5. Write sft.py: load the checkpoint, apply step 1, and call train.
+6. Update generate to use the shared prompt-building function, add a greedy option, and stop on <|im_end|>.
