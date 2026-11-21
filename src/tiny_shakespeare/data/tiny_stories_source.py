@@ -12,6 +12,9 @@ FILENAMES: dict[Split, str] = {
 }
 # The files hold one story after another, separated by this.
 END_OF_TEXT = "<|endoftext|>"
+# Special tokens for finetuning.
+IM_START = "<|im_start|>"
+IM_END = "<|im_end|>"
 DEFAULT_CHUNK_CHARS = 10_000
 # How many characters we pull from the file per read.
 _CHARS_PER_RAW_READ = 1 << 24
@@ -25,7 +28,7 @@ class TinyStoriesSource(DataSource):
     """
 
     name = "tiny-stories"
-    special_tokens = [END_OF_TEXT]
+    special_tokens = [END_OF_TEXT, IM_START, IM_END]
 
     def __init__(self, chunk_chars: int = DEFAULT_CHUNK_CHARS):
         if chunk_chars <= 0:

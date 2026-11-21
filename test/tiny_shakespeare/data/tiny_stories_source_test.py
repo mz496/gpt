@@ -56,7 +56,7 @@ def set_file(download: FakeDownload, text: str) -> None:
 def test_name_and_special_tokens() -> None:
     source = TinyStoriesSource()
     assert source.name == "tiny-stories"
-    assert source.special_tokens == ["<|endoftext|>"]
+    assert source.special_tokens == ["<|endoftext|>", "<|im_start|>", "<|im_end|>"]
 
 
 @pytest.mark.parametrize("chunk_chars", [0, -1])
