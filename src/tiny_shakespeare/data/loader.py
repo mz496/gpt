@@ -24,3 +24,7 @@ def get_batch(tokenized_data: np.ndarray[Any, Any], batch_size: int, block_size:
     x = torch.from_numpy(tokenized_data[indices].astype(np.int64))  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
     y = torch.from_numpy(tokenized_data[indices + 1].astype(np.int64))  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
     return x, y
+
+def get_sft_batch():
+    # TODO[sft]
+    pass

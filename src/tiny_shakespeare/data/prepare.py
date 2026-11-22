@@ -15,7 +15,7 @@ class PreparedData:
     train_chars: int
     validation_chars: int
 
-def encode_split(source: DataSource, split: Split, tokenizer: Tokenizer, dtype: np.dtype[Any], max_chars: int | None = None) -> tuple[np.ndarray[Any, Any], int]:
+def _encode_split(source: DataSource, split: Split, tokenizer: Tokenizer, dtype: np.dtype[Any], max_chars: int | None = None) -> tuple[np.ndarray[Any, Any], int]:
     """
     Tokenizes one split chunk by chunk. Returns the token ids and the number of chars they came from.
 
@@ -59,6 +59,10 @@ def prepare(source: DataSource, tokenizer: Tokenizer, max_train_chars: int | Non
     """
     # Narrowest unsigned dtype that fits every id; get_batch widens each window to int64.
     dtype = np.dtype(np.uint16 if len(tokenizer.get_vocab()) <= 2**16 else np.uint32)
-    train, train_chars = encode_split(source, "train", tokenizer, dtype, max_train_chars)
-    validation, validation_chars = encode_split(source, "validation", tokenizer, dtype)
+    train, train_chars = _encode_split(source, "train", tokenizer, dtype, max_train_chars)
+    validation, validation_chars = _encode_split(source, "validation", tokenizer, dtype)
     return PreparedData(train=train, validation=validation, train_chars=train_chars, validation_chars=validation_chars)
+
+def prepare_sft() -> PreparedData:
+    # TODO[sft]
+    pass
