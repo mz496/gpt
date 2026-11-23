@@ -1,4 +1,5 @@
 import argparse
+from collections.abc import Callable
 from dataclasses import asdict
 from typing import Any
 
@@ -24,6 +25,9 @@ def autocast_dtype() -> torch.dtype | None:
     return None
 
 EvalBatches = dict[str, list[tuple[torch.Tensor, torch.Tensor]]]
+
+# Called at each loss estimate with (step, model, the losses from estimate_loss); returns extra metrics to log next to the losses.
+MetricsHook = Callable[[int, GPT, dict[str, float]], dict[str, float]]
 
 def make_eval_batches(cfg: TrainConfig, tokenized_train_data: np.ndarray[Any, Any], tokenized_val_data: np.ndarray[Any, Any], device: str) -> EvalBatches:
     """
@@ -70,7 +74,31 @@ def estimate_loss(model: torch.nn.Module, eval_batches: EvalBatches, dtype: torc
     model.train()
     return result
 
-def train(cfg: TrainConfig, step_count: int, model: GPT, tokenized_train_data: np.ndarray[Any, Any], tokenized_val_data: np.ndarray[Any, Any], device: str, num_train_chars: int, num_val_chars: int, run: wandb.Run, timer: PhaseTimer | None = None, dtype: torch.dtype | None = None) -> GPT:
+@torch.no_grad
+def run_metrics_hook(hook: MetricsHook, step: int, model: GPT, losses: dict[str, float], dtype: torch.dtype | None = None) -> dict[str, float]:
+    """
+    Runs the hook the way estimate_loss runs its forwards, so that a hook can't affect training: no gradients, eval mode (no dropout), and the training dtype.
+    The model is back in train mode afterwards, even if the hook raises.
+    """
+    model.eval()
+    try:
+        with torch.autocast("cuda", dtype=dtype, enabled=dtype is not None):
+            return hook(step, model, losses)
+    finally:
+        model.train()
+
+def train(
+    cfg: TrainConfig,
+    step_count: int,
+    model: GPT,
+    tokenized_train_data: np.ndarray[Any, Any],
+    tokenized_val_data: np.ndarray[Any, Any],
+    device: str,
+    run: wandb.Run,
+    timer: PhaseTimer | None = None,
+    dtype: torch.dtype | None = None,
+    metrics_hook: MetricsHook | None = None,
+) -> GPT:
     timer = timer or PhaseTimer(enabled=False)
     # A reasonable lr for adam is 1e-3 to 1e-4.
     optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.learning_rate, fused=True)
@@ -96,16 +124,18 @@ def train(cfg: TrainConfig, step_count: int, model: GPT, tokenized_train_data: n
             with timer.phase("estimate_loss"):
                 losses = estimate_loss(model, eval_batches, dtype)
             print(f"step={step:04d} loss={losses}")
-            # Loss per token isn't comparable across tokenizers, so also log it per character of the set we're computing loss over.
-            train_bpc = bits_per_char(losses["train"], len(tokenized_train_data), num_train_chars)
-            val_bpc = bits_per_char(losses["validation"], len(tokenized_val_data), num_val_chars)
+            metrics = {
+                "train/loss": losses["train"],
+                "validation/loss": losses["validation"],
+            }
+            if metrics_hook is not None:
+                with timer.phase("metrics_hook"):
+                    extra = run_metrics_hook(metrics_hook, step, model, losses, dtype)
+                if clashing := metrics.keys() & extra.keys():
+                    raise ValueError(f"metrics hook returned keys that train() already logs: {sorted(clashing)}")
+                metrics.update(extra)
             with timer.phase("wandb_log"):
-                run.log({
-                    "train/loss": losses["train"],
-                    "train/loss_bpc": train_bpc,
-                    "validation/loss": losses["validation"],
-                    "validation/loss_bpc": val_bpc,
-                }, step=step)
+                run.log(metrics, step=step)
 
         # Write in gradients based on how bad this iteration was.
         with timer.phase("backward"):
@@ -182,9 +212,16 @@ def main():
     # A unique and sortable run ID to identify this run.
     run_id = f"{name}_{run.id}"
 
+    def bpc_hook(_step: int, _model: GPT, losses: dict[str, float]) -> dict[str, float]:
+        # Loss per token isn't comparable across tokenizers, so also log it per character of the set we're computing loss over.
+        return {
+            "train/loss_bpc": bits_per_char(losses["train"], len(data.train), data.train_chars),
+            "validation/loss_bpc": bits_per_char(losses["validation"], len(data.validation), data.validation_chars),
+        }
+
     train_timer = PhaseTimer(enabled=args.profile, sync=True)
     with setup_timer.phase("train"):
-        model = train(cfg, cfg.train_steps, model, data.train, data.validation, device, data.train_chars, data.validation_chars, run, train_timer, dtype)
+        model = train(cfg, cfg.train_steps, model, data.train, data.validation, device, run, train_timer, dtype, metrics_hook=bpc_hook)
 
     with setup_timer.phase("save_checkpoint"):
         checkpoint_path = save_checkpoint(model, run_id, tokenizer)
