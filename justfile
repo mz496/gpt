@@ -30,6 +30,10 @@ sft run_id *args:
 gpt-generate run_id *args:
     uv run --locked -m src.tiny_shakespeare.models.gpt.generate {{run_id}} {{args}}
 
+# Finetunes a training run ID checkpoint on a Modal GPU worker, reading it from (and writing the result to) the gpt-checkpoints volume
+modal-sft run_id *args:
+    uv run --locked modal run scripts/modal_sft.py --run-id {{run_id}} --args "{{args}}"
+
 # Generates from a training run ID checkpoint on a Modal worker, reading it from the gpt-checkpoints volume
 modal-generate run_id *args:
     uv run --locked modal run scripts/modal_generate.py --run-id {{run_id}} --args "{{args}}"
