@@ -6,6 +6,7 @@ import numpy as np
 
 from ..tokenizers.tokenizer import Tokenizer
 from .data_source import DataSource, Split
+from .loader import IGNORE_INDEX, SftData
 from .sft.sft_data_source import SFTDataSource
 
 @dataclass
@@ -64,18 +65,58 @@ def prepare(source: DataSource, tokenizer: Tokenizer, max_train_chars: int | Non
     validation, validation_chars = _encode_split(source, "validation", tokenizer, dtype)
     return PreparedData(train=train, validation=validation, train_chars=train_chars, validation_chars=validation_chars)
 
-def _encode_split_sft(source: SFTDataSource, split: Split, tokenizer: Tokenizer, dtype: np.dtype[Any]) -> np.ndarray[Any, Any]:
-    # TODO: Raise if any example would exceed block_size from cfg
-    arrays: list[np.ndarray[Any, Any]] = []
-    for example in source.iter_examples(split):
-        example_tokens = tokenizer.encode_string(example.to_prompt_string()) + tokenizer.encode_string(example.to_response_string())
-        arrays.append(np.asarray(example_tokens, dtype=dtype))
-    return np.concatenate(arrays) if arrays else np.empty(0, dtype=dtype)
+# Pads the inputs. Any valid id works: padding is never predicted (its targets are IGNORE_INDEX), and under causal attention no earlier token sees it.
+PAD_ID = 0
 
-def prepare_sft(source: SFTDataSource, tokenizer: Tokenizer, block_size: int) -> PreparedData:
-    # Narrowest unsigned dtype that fits every id; get_batch widens each window to int64.
+def _encode_split_sft(source: SFTDataSource, split: Split, tokenizer: Tokenizer, dtype: np.dtype[Any], block_size: int) -> SftData:
+    f"""
+    Tokenizes one split example by example, as the prompt followed by the response.
+    A full example of [t1 t2 t3 t4 t5] is:
+    - Cut at the beginning and end (so target[j] follows input[:j+1])
+        - Input:  [t1 t2 t3 t4]
+        - Target: [t2 t3 t4 t5] (shifted by 1)
+    - Masked so the target receives IGNORE_INDEX everywhere where the input's request falls (so we only learn the response)
+        - Input:  [t1 t2 t3 t4]
+        - Target: [II II t4 t5]
+    - Padded to the longest example across the entire split (so that among a split, we have a consistent block_size)
+        - Input:  [t1 t2 t3 t4 PI PI PI]
+        - Target: [II II t4 t5 II II II]
+    """
+    # Holds one input row per example.
+    inputs_per_example: list[np.ndarray[Any, Any]] = []
+    # Holds one output row per example.
+    targets_per_example: list[np.ndarray[Any, Any]] = []
+    for example in source.iter_examples(split):
+        request_tokens = tokenizer.encode_string(example.to_request_string())
+        response_tokens = tokenizer.encode_string(example.to_response_string())
+        if not response_tokens:
+            raise ValueError(f"{split} example {example.input!r} has an empty response, so there would be nothing to train on")
+        tokens = np.asarray(request_tokens + response_tokens, dtype=dtype)
+        if len(tokens) - 1 > block_size:
+            raise ValueError(f"{split} example {example.input[:30]!r} is {len(tokens) - 1} tokens long once cut, which doesn't fit in block_size {block_size}")
+        # The ids are unsigned, which can't hold IGNORE_INDEX, so the targets are a (copied) int64 array.
+        targets = tokens[1:].astype(np.int64)
+        # targets[j] is tokens[j+1], and the first response token is tokens[len(prompt_tokens)], so the first target to keep is at len(prompt_tokens) - 1.
+        targets[:len(request_tokens) - 1] = IGNORE_INDEX
+        inputs_per_example.append(tokens[:-1])
+        targets_per_example.append(targets)
+    if not inputs_per_example:
+        raise ValueError(f"the {split} split has no examples")
+
+    width = max(len(inputs) for inputs in inputs_per_example)
+    inputs = np.full((len(inputs_per_example), width), PAD_ID, dtype=dtype)
+    targets = np.full((len(targets_per_example), width), IGNORE_INDEX, dtype=np.int64)
+    for i, (example_inputs, example_targets) in enumerate(zip(inputs_per_example, targets_per_example)):
+        inputs[i, :len(example_inputs)] = example_inputs
+        targets[i, :len(example_targets)] = example_targets
+    return SftData(inputs=inputs, targets=targets)
+
+def prepare_sft(source: SFTDataSource, tokenizer: Tokenizer, block_size: int) -> dict[Split, SftData]:
+    """
+    The train and validation splits of the source as the SftData that get_sft_batch takes, using an already-trained tokenizer.
+    Raises if any example doesn't fit in block_size.
+    """
+    # Narrowest unsigned dtype that fits every id; get_sft_batch widens each batch to int64.
     dtype = np.dtype(np.uint16 if len(tokenizer.get_vocab()) <= 2**16 else np.uint32)
-    train = _encode_split_sft(source, "train", tokenizer, dtype)
-    validation = _encode_split_sft(source, "validation", tokenizer, dtype)
-    return PreparedData(train=train, validation=validation, train_chars=0, validation_chars=0)
-    
+    splits: tuple[Split, ...] = ("train", "validation")
+    return {split: _encode_split_sft(source, split, tokenizer, dtype, block_size) for split in splits}

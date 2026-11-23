@@ -13,12 +13,12 @@ class SftExample:
     input: str
     output: str
 
-    def to_prompt_string(self):
-        """Prompt formatted as ChatML"""
-        return f"{IM_START}user\n{self.input}\n"
+    def to_request_string(self):
+        """User request (everything except the response, for finetuning) formatted as ChatML"""
+        return f"{IM_START}user\n{self.input}\n{IM_START}assistant"
     def to_response_string(self):
         """Response formatted as ChatML"""
-        return f"{IM_START}assistant\n{self.input}\n"
+        return f"{self.output}\n"
 
 class SFTDataSource(ABC):
     """

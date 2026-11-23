@@ -40,7 +40,7 @@ def sft(checkpoint_run_id: str, cfg: TrainConfig, data_source: SFTDataSource):
 
     # Prepare examples: tokenize, mask, etc. (prepare_sft)
     prepared_data = prepare_sft(data_source, tokenizer, block_size=cfg.block_size)
-    print(prepared_data.train)
+    print(prepared_data["train"])
     
     # TODO: complete:
 
