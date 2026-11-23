@@ -6,6 +6,7 @@ import numpy as np
 
 from ..tokenizers.tokenizer import Tokenizer
 from .data_source import DataSource, Split
+from .sft.sft_data_source import SFTDataSource
 
 @dataclass
 class PreparedData:
@@ -63,6 +64,18 @@ def prepare(source: DataSource, tokenizer: Tokenizer, max_train_chars: int | Non
     validation, validation_chars = _encode_split(source, "validation", tokenizer, dtype)
     return PreparedData(train=train, validation=validation, train_chars=train_chars, validation_chars=validation_chars)
 
-def prepare_sft() -> PreparedData:
-    # TODO[sft]
-    pass
+def _encode_split_sft(source: SFTDataSource, split: Split, tokenizer: Tokenizer, dtype: np.dtype[Any]) -> np.ndarray[Any, Any]:
+    # TODO: Raise if any example would exceed block_size from cfg
+    arrays: list[np.ndarray[Any, Any]] = []
+    for example in source.iter_examples(split):
+        example_tokens = tokenizer.encode_string(example.to_prompt_string()) + tokenizer.encode_string(example.to_response_string())
+        arrays.append(np.asarray(example_tokens, dtype=dtype))
+    return np.concatenate(arrays) if arrays else np.empty(0, dtype=dtype)
+
+def prepare_sft(source: SFTDataSource, tokenizer: Tokenizer, block_size: int) -> PreparedData:
+    # Narrowest unsigned dtype that fits every id; get_batch widens each window to int64.
+    dtype = np.dtype(np.uint16 if len(tokenizer.get_vocab()) <= 2**16 else np.uint32)
+    train = _encode_split_sft(source, "train", tokenizer, dtype)
+    validation = _encode_split_sft(source, "validation", tokenizer, dtype)
+    return PreparedData(train=train, validation=validation, train_chars=0, validation_chars=0)
+    

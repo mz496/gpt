@@ -5,7 +5,8 @@ import pytest
 
 from src.tiny_shakespeare.data import tiny_stories_source as module
 from src.tiny_shakespeare.data.prepare import prepare
-from src.tiny_shakespeare.data.tiny_stories_source import END_OF_TEXT, TinyStoriesSource
+from src.tiny_shakespeare.data.special_tokens import END_OF_TEXT
+from src.tiny_shakespeare.data.tiny_stories_source import TinyStoriesSource
 from src.tiny_shakespeare.tokenizers.char_tokenizer import CharTokenizer
 
 TRAIN_FILE = "TinyStoriesV2-GPT4-train.txt"

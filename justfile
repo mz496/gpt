@@ -22,6 +22,10 @@ modal-prewarm:
 modal-prewarm-check:
     uv run --locked modal run scripts/modal_prewarm_data_check.py
 
+# Finetunes a checkpoint (by training run ID) on the string reversal task
+sft run_id *args:
+    uv run --locked -m src.tiny_shakespeare.models.gpt.sft {{run_id}} {{args}}
+
 # Generates from a specified training run ID checkpoint
 gpt-generate run_id *args:
     uv run --locked -m src.tiny_shakespeare.models.gpt.generate {{run_id}} {{args}}

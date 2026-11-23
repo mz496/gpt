@@ -4,17 +4,13 @@ from typing import Iterator, override
 from huggingface_hub import hf_hub_download  # pyright: ignore[reportUnknownVariableType] Partially unknown overload types.
 
 from .data_source import DataSource, Split
+from .special_tokens import END_OF_TEXT, IM_END, IM_START
 
 REPO_ID = "roneneldan/TinyStories"
 FILENAMES: dict[Split, str] = {
     "train": "TinyStoriesV2-GPT4-train.txt",
     "validation": "TinyStoriesV2-GPT4-valid.txt",
 }
-# The files hold one story after another, separated by this.
-END_OF_TEXT = "<|endoftext|>"
-# Special tokens for finetuning.
-IM_START = "<|im_start|>"
-IM_END = "<|im_end|>"
 DEFAULT_CHUNK_CHARS = 10_000
 # How many characters we pull from the file per read.
 _CHARS_PER_RAW_READ = 1 << 24
