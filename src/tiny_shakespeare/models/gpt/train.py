@@ -1,14 +1,12 @@
 import argparse
 from collections.abc import Callable
 from dataclasses import asdict
-from typing import Any
 
-import numpy as np
 import torch
 import wandb
 
 from ...config import CONFIG_NAMES, TrainConfig, load_config
-from ...data.data_source import TOKENIZER_TEXT_MAX_CHARS
+from ...data.data_source import TOKENIZER_TEXT_MAX_CHARS, Split
 from ...data.loader import get_batch
 from ...data.prepare import prepare, train_tokenizer
 from ...data.tiny_shakespeare_source import TinyShakespeareSource
@@ -24,14 +22,18 @@ def autocast_dtype() -> torch.dtype | None:
         return torch.bfloat16
     return None
 
-EvalBatches = dict[str, list[tuple[torch.Tensor, torch.Tensor]]]
+EvalBatches = dict[Split, list[tuple[torch.Tensor, torch.Tensor]]]
+
+# Draws one (contexts, targets) batch of [B, T] int64 CPU tensors, using the given generator for all of its randomness.
+# The data, batch size and block size are already bound in, so that train() doesn't need to know what kind of data it is training on.
+BatchFn = Callable[[torch.Generator], tuple[torch.Tensor, torch.Tensor]]
 
 # Called at each loss estimate with (step, model, the losses from estimate_loss); returns extra metrics to log next to the losses.
-MetricsHook = Callable[[int, GPT, dict[str, float]], dict[str, float]]
+MetricsHook = Callable[[int, GPT, dict[Split, float]], dict[str, float]]
 
-def make_eval_batches(cfg: TrainConfig, tokenized_train_data: np.ndarray[Any, Any], tokenized_val_data: np.ndarray[Any, Any], device: str) -> EvalBatches:
+def make_eval_batches(cfg: TrainConfig, batch_fns: dict[Split, BatchFn], device: str) -> EvalBatches:
     """
-    Build the cfg.eval_iters (contexts, targets) batches used for loss estimation, per dataset, grouped into chunks.
+    Build the cfg.eval_iters (contexts, targets) batches used for loss estimation, per dataset split (the keys of batch_fns), grouped into chunks.
 
     Each chunk concatenates up to cfg.eval_chunk_size consecutive batches along the batch dimension, so that estimate_loss can run a single forward per chunk.
     The last chunk is smaller when eval_iters isn't a multiple of eval_chunk_size.
@@ -41,9 +43,9 @@ def make_eval_batches(cfg: TrainConfig, tokenized_train_data: np.ndarray[Any, An
     Since they never change, we build them once up front instead of on every estimate.
     """
     result: EvalBatches = {}
-    for dataset_type, data in [("train", tokenized_train_data), ("validation", tokenized_val_data)]:
+    for dataset_type, batch_fn in batch_fns.items():
         generator = torch.Generator().manual_seed(cfg.eval_seed)
-        batches = [get_batch(data, cfg.batch_size, cfg.block_size, generator) for _ in range(cfg.eval_iters)]
+        batches = [batch_fn(generator) for _ in range(cfg.eval_iters)]
         result[dataset_type] = [
             (torch.cat([contexts for contexts, _ in chunk]).to(device), torch.cat([targets for _, targets in chunk]).to(device))
             for chunk in (batches[i:i + cfg.eval_chunk_size] for i in range(0, len(batches), cfg.eval_chunk_size))
@@ -51,7 +53,7 @@ def make_eval_batches(cfg: TrainConfig, tokenized_train_data: np.ndarray[Any, An
     return result
 
 @torch.no_grad
-def estimate_loss(model: torch.nn.Module, eval_batches: EvalBatches, dtype: torch.dtype | None = None) -> dict[str, float]:
+def estimate_loss(model: torch.nn.Module, eval_batches: EvalBatches, dtype: torch.dtype | None = None) -> dict[Split, float]:
     """
     Estimate loss over train, validation as the mean loss over the fixed batches from make_eval_batches.
 
@@ -61,7 +63,7 @@ def estimate_loss(model: torch.nn.Module, eval_batches: EvalBatches, dtype: torc
     If dtype is given, the forwards run under autocast in that dtype (mixed precision); the losses are still fp32.
     """
     model.eval()
-    result: dict[str, float] = {}
+    result: dict[Split, float] = {}
     for dataset_type, chunks in eval_batches.items():
         # Compute the mean per dataset type.
         # model(contexts, targets) outputs (logits, loss) where loss is 0-dim float
@@ -75,7 +77,7 @@ def estimate_loss(model: torch.nn.Module, eval_batches: EvalBatches, dtype: torc
     return result
 
 @torch.no_grad
-def run_metrics_hook(hook: MetricsHook, step: int, model: GPT, losses: dict[str, float], dtype: torch.dtype | None = None) -> dict[str, float]:
+def run_metrics_hook(hook: MetricsHook, step: int, model: GPT, losses: dict[Split, float], dtype: torch.dtype | None = None) -> dict[str, float]:
     """
     Runs the hook the way estimate_loss runs its forwards, so that a hook can't affect training: no gradients, eval mode (no dropout), and the training dtype.
     The model is back in train mode afterwards, even if the hook raises.
@@ -91,8 +93,8 @@ def train(
     cfg: TrainConfig,
     step_count: int,
     model: GPT,
-    tokenized_train_data: np.ndarray[Any, Any],
-    tokenized_val_data: np.ndarray[Any, Any],
+    # One batch function per dataset split.
+    batch_fns: dict[Split, BatchFn],
     device: str,
     run: wandb.Run,
     timer: PhaseTimer | None = None,
@@ -105,14 +107,14 @@ def train(
     # Generator for training batches, so the order of training data doesn't depend on how much randomness dropout consumes.
     train_generator = torch.Generator().manual_seed(cfg.train_seed)
     # Cache the batches (where the batch count = cfg.eval_iters) of the train/val sets in order to estimate loss over the whole sets, for reuse in the hot loop.
-    eval_batches = make_eval_batches(cfg, tokenized_train_data, tokenized_val_data, device)
+    eval_batches = make_eval_batches(cfg, batch_fns, device)
     for step in range(step_count):
         # Zero out gradients for this iteration.
         with timer.phase("zero_grad"):
             model.zero_grad()
 
         with timer.phase("get_batch"):
-            contexts, targets = get_batch(tokenized_train_data, batch_size=cfg.batch_size, block_size=cfg.block_size, generator=train_generator)
+            contexts, targets = batch_fns["train"](train_generator)
             contexts, targets = contexts.to(device), targets.to(device)
         with timer.phase("forward"):
             # bf16 has fp32's exponent range, so unlike fp16 no loss scaling is needed. The backward pass needs no autocast of its own.
@@ -212,16 +214,21 @@ def main():
     # A unique and sortable run ID to identify this run.
     run_id = f"{name}_{run.id}"
 
-    def bpc_hook(_step: int, _model: GPT, losses: dict[str, float]) -> dict[str, float]:
+    def bpc_hook(_step: int, _model: GPT, losses: dict[Split, float]) -> dict[str, float]:
         # Loss per token isn't comparable across tokenizers, so also log it per character of the set we're computing loss over.
         return {
             "train/loss_bpc": bits_per_char(losses["train"], len(data.train), data.train_chars),
             "validation/loss_bpc": bits_per_char(losses["validation"], len(data.validation), data.validation_chars),
         }
 
+    batch_fns: dict[Split, BatchFn] = {
+        "train": lambda generator: get_batch(data.train, cfg.batch_size, cfg.block_size, generator),
+        "validation": lambda generator: get_batch(data.validation, cfg.batch_size, cfg.block_size, generator),
+    }
+
     train_timer = PhaseTimer(enabled=args.profile, sync=True)
     with setup_timer.phase("train"):
-        model = train(cfg, cfg.train_steps, model, data.train, data.validation, device, run, train_timer, dtype, metrics_hook=bpc_hook)
+        model = train(cfg, cfg.train_steps, model, batch_fns, device, run, train_timer, dtype, metrics_hook=bpc_hook)
 
     with setup_timer.phase("save_checkpoint"):
         checkpoint_path = save_checkpoint(model, run_id, tokenizer)
