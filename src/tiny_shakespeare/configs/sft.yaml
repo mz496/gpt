@@ -1,0 +1,12 @@
+# Finetuning a checkpoint (see models/gpt/sft.py). The same training settings as scaleup's.
+# There is no model or flags section: the checkpoint decides the architecture.
+
+train:
+  train_steps: 1500
+  train_seed: 1337
+  eval_seed: 1338
+  batch_size: 64
+  learning_rate: 3.0e-4
+  eval_iters: 50
+  # Smaller than eval_iters to bound activation memory at this model size.
+  eval_chunk_size: 10

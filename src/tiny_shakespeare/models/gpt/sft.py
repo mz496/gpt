@@ -1,14 +1,20 @@
-
 import argparse
+from dataclasses import asdict
 
+import torch
+import wandb
+
+from src.tiny_shakespeare.config import CONFIG_NAMES, TrainConfig, load_train_config
+from src.tiny_shakespeare.data.data_source import Split
 from src.tiny_shakespeare.data.loader import get_sft_batch
 from src.tiny_shakespeare.data.prepare import prepare_sft
 from src.tiny_shakespeare.data.sft.reverse_source import ReverseSource
 from src.tiny_shakespeare.data.sft.sft_data_source import SFTDataSource
 from src.tiny_shakespeare.data.special_tokens import IM_END, IM_START
-from src.tiny_shakespeare.models.gpt.model import GPT, load_checkpoint, load_checkpoint_tokenizer
+from src.tiny_shakespeare.models.gpt.model import GPT, load_checkpoint, load_checkpoint_tokenizer, save_checkpoint
+from src.tiny_shakespeare.models.gpt.train import BatchFn, autocast_dtype, train
 from src.tiny_shakespeare.tokenizers.tokenizer import Tokenizer
-from src.tiny_shakespeare.utils import get_device
+from src.tiny_shakespeare.utils import get_device, timestamp
 
 SOURCES: dict[str, type[SFTDataSource]] = {
     "reverse": ReverseSource,
@@ -24,32 +30,58 @@ def check_checkpoint(model: GPT, tokenizer: Tokenizer) -> None:
     if len(tokenizer.get_vocab()) != model.config.vocab_size:
         raise ValueError(f"the tokenizer's vocab size {len(tokenizer.get_vocab())} does not match the model's {model.config.vocab_size}")
 
-def sft(checkpoint_run_id: str, data_source: SFTDataSource):
+def sft(checkpoint_run_id: str, data_source: SFTDataSource, cfg: TrainConfig, suffix: str | None = None) -> str:
+    """Finetunes the checkpoint on the data source and saves the result as a new checkpoint. Returns the new run's id."""
     device = get_device()
     print(f"available device: {device}")
-    checkpoint = load_checkpoint(checkpoint_run_id, device)
+    model = load_checkpoint(checkpoint_run_id, device)
     tokenizer = load_checkpoint_tokenizer(checkpoint_run_id)
-    check_checkpoint(checkpoint, tokenizer)
+    check_checkpoint(model, tokenizer)
 
-    # Prepare examples: tokenize, mask, etc. (prepare_sft)
     # The checkpoint's context length is fixed (its position table has that many rows), so it decides how long an example can be.
-    prepared_data = prepare_sft(data_source, tokenizer, block_size=checkpoint.config.block_size)
-    print(prepared_data["train"])
-    
-    # TODO: complete:
+    block_size = model.config.block_size
+    prepared_data = prepare_sft(data_source, tokenizer, block_size=block_size)
 
-    #get_sft_batch()
+    torch.manual_seed(cfg.train_seed)  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
+    dtype = autocast_dtype()
+    print(f"training dtype: {dtype or torch.float32}")
 
-    #train()
-    
+    batch_fns: dict[Split, BatchFn] = {
+        "train": lambda generator: get_sft_batch(prepared_data["train"], cfg.batch_size, block_size, generator),
+        "validation": lambda generator: get_sft_batch(prepared_data["validation"], cfg.batch_size, block_size, generator),
+    }
+
+    name = timestamp()
+    if suffix:
+        name = f"{name}_{suffix}"
+    run = wandb.init(project="gpt-experiments", name=name, tags=["sft"], config={
+        "train_config": asdict(cfg),
+        "model_config": asdict(model.config),
+        "_args": {"base_run_id": checkpoint_run_id, "source": type(data_source).__name__},
+        "_debug": {"device": device, "training_dtype_override": dtype},
+    })
+    # A unique and sortable run ID to identify this run.
+    run_id = f"{name}_{run.id}"
+
+    # load_checkpoint returns the model in eval mode, which would train without dropout until the first loss estimate flips it.
+    model.train()
+    model = train(cfg, cfg.train_steps, model, batch_fns, device, run, dtype=dtype)
+
+    checkpoint_path = save_checkpoint(model, run_id, tokenizer)
+    print(f"saved checkpoint to {checkpoint_path}")
+    run.finish()
+    print(f"run_id={run_id}")
+    return run_id
 
 def main():
     parser = argparse.ArgumentParser(description="Finetune a trained run's checkpoint.")
     parser.add_argument("run_id", help="run id of the checkpoint to finetune, e.g. 2026-10-28T11:34:42_abc123")
+    parser.add_argument("--config", choices=CONFIG_NAMES, default="sft", help="which config in configs/ to take the training settings from (its train section)")
     parser.add_argument("--source", choices=list(SOURCES), default="reverse", help="which SFT dataset to finetune on")
+    parser.add_argument("--suffix", default=None, help="appended to the wandb run name (and checkpoint name), e.g. <timestamp>_abc123")
     args = parser.parse_args()
 
-    sft(args.run_id, SOURCES[args.source]())
+    sft(args.run_id, SOURCES[args.source](), load_train_config(args.config), args.suffix)
 
 if __name__ == "__main__":
     main()

@@ -69,3 +69,15 @@ def load_config(name: str) -> Config:
     if raw.keys() != {"train", "model", "flags"}:
         raise TypeError(f"configs/{name}.yaml must have exactly the sections ['flags', 'model', 'train'], got {sorted(raw)}")
     return Config(train=TrainConfig(**raw["train"]), model=ModelConfig(**raw["model"]), flags=FlagConfig(**raw["flags"]))
+
+
+def load_train_config(name: str) -> TrainConfig:
+    """
+    Load just the train section of configs/<name>.yaml, ignoring any other sections.
+    For when the model comes from elsewhere (e.g. finetuning a checkpoint, which has its own), so that the config needs no model or flags section.
+    """
+    with open(CONFIG_DIR / f"{name}.yaml") as f:
+        raw = yaml.safe_load(f)
+    if "train" not in raw:
+        raise TypeError(f"configs/{name}.yaml has no train section, got {sorted(raw)}")
+    return TrainConfig(**raw["train"])

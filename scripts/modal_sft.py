@@ -1,9 +1,10 @@
 """
 Finetunes a training run's checkpoint on a Modal GPU worker. Arguments are forwarded to sft.py unchanged:
 
-    just modal-sft <run_id> --source reverse
+    just modal-sft <run_id> --suffix reverse1
 
-(which runs modal run scripts/modal_sft.py --run-id <run_id> --args "--source reverse")
+(which runs modal run scripts/modal_sft.py --run-id <run_id> --args "--suffix reverse1")
+The training settings come from configs/sft.yaml unless --config says otherwise; the model comes from the checkpoint.
 
 The checkpoint is read from the "gpt-checkpoints" Modal volume, where scripts/modal_train.py wrote checkpoints/<run_id>/model.pt and tokenizer.json.
 The finetuned checkpoint is written to the same volume, and can be generated from with `just modal-generate <new run id>`.

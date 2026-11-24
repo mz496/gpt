@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from src.tiny_shakespeare import config as config_module
-from src.tiny_shakespeare.config import CONFIG_NAMES, Config, FlagConfig, ModelConfig, TrainConfig, load_config
+from src.tiny_shakespeare.config import CONFIG_NAMES, Config, FlagConfig, ModelConfig, TrainConfig, load_config, load_train_config
 
 VALID = """
 train:
@@ -40,7 +40,13 @@ def write_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[[s
 
 
 @pytest.mark.parametrize("name", CONFIG_NAMES)
-def test_every_shipped_config_loads_into_its_three_sections(name: str) -> None:
+def test_every_shipped_config_has_a_loadable_train_section(name: str) -> None:
+    assert isinstance(load_train_config(name), TrainConfig)
+
+
+# sft.yaml only has a train section, since a finetuned model comes from its checkpoint.
+@pytest.mark.parametrize("name", ["default", "scaleup"])
+def test_every_full_config_loads_into_its_three_sections(name: str) -> None:
     config = load_config(name)
     assert isinstance(config, Config)
     assert isinstance(config.train, TrainConfig)
@@ -61,6 +67,13 @@ def test_load_config_puts_each_key_in_its_section(write_config: Callable[[str], 
     assert config.train == TrainConfig(train_steps=10, train_seed=1, eval_seed=2, batch_size=4, learning_rate=1.0e-3, eval_iters=5, eval_chunk_size=5)
     assert config.model == ModelConfig(n_embd=8, n_head=2, n_layer=1, block_size=16, dropout=0.1)
     assert config.flags == FlagConfig(flag_use_parallel_heads=True, flag_use_pytorch_attention_impl=False)
+
+
+def test_load_train_config_reads_only_the_train_section(write_config: Callable[[str], str]) -> None:
+    train_only = VALID.split("model:")[0]
+    assert load_train_config(write_config(train_only)) == load_config(write_config(VALID)).train
+    with pytest.raises(TypeError, match="no train section"):
+        load_train_config(write_config("model:\n  n_embd: 8\n"))
 
 
 def test_a_missing_or_extra_section_raises(write_config: Callable[[str], str]) -> None:
