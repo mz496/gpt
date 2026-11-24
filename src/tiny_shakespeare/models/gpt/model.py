@@ -467,13 +467,14 @@ class GPT(torch.nn.Module):
             loss = F.cross_entropy(logits.view(B*T, vocab_size), targets.view(B*T,))
         return logits, loss
 
-    def generate(self, idx: torch.Tensor, max_tokens: int, stop_token_ids: set[int] | None = None):
+    def generate(self, idx: torch.Tensor, max_tokens: int, stop_token_ids: set[int] | None = None, greedy: bool = False):
         """
         Using the model's learned weights, generate up to `max_tokens` chars per batch.
         Inputs
         - idx: [B, T] "indices into the vocab".
         - stop_token_ids: stop early once every batch element has generated one of these tokens (the token is kept in the output).
           An element that stops before the others keeps being extended, so only the last stopping element's output ends at its stop token.
+        - greedy: take the most likely token each step, instead of sampling from the distribution. Then the output doesn't depend on the RNG.
 
         Outputs
         - [B, T+n] where n <= max_tokens
@@ -499,8 +500,11 @@ class GPT(torch.nn.Module):
             # "The rows of input do not need to sum to one (in which case we use the values as weights), but must be non-negative, finite and have a non-zero sum."
             # "If input is a matrix with m rows, out is an matrix of shape (m * num_samples)"
             last_col_logits = logits[:, -1, :]
-            last_col_probs = F.softmax(last_col_logits, dim=-1)
-            next_tokens = torch.multinomial(input=last_col_probs, num_samples=1)
+            if greedy:
+                next_tokens = last_col_logits.argmax(dim=-1, keepdim=True)
+            else:
+                last_col_probs = F.softmax(last_col_logits, dim=-1)
+                next_tokens = torch.multinomial(input=last_col_probs, num_samples=1)
 
             # Append to each batch along the time dimension.
             # torch.cat allocates a new tensor, so no need to .clone().
