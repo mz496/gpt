@@ -166,7 +166,7 @@ def main():
     args = parser.parse_args()
     cfg = load_config(args.config)
 
-    torch.manual_seed(cfg.train_seed)  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
+    torch.manual_seed(cfg.train.train_seed)  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
 
     # Coarse timings of everything around the training loop (data, tokenizer, wandb, checkpoint)
     setup_timer = PhaseTimer()
@@ -189,15 +189,15 @@ def main():
 
     config = GPTConfig(
         vocab_size=len(tokenizer.get_vocab()),
-        n_embd=cfg.n_embd,
-        n_head=cfg.n_head,
-        n_layer=cfg.n_layer,
-        block_size=cfg.block_size,
-        dropout=cfg.dropout,
-        flag_use_parallel_heads=cfg.flag_use_parallel_heads,
+        n_embd=cfg.model.n_embd,
+        n_head=cfg.model.n_head,
+        n_layer=cfg.model.n_layer,
+        block_size=cfg.model.block_size,
+        dropout=cfg.model.dropout,
+        flag_use_parallel_heads=cfg.flags.flag_use_parallel_heads,
     )
     with setup_timer.phase("build_model"):
-        model = GPT(config, flag_use_pytorch_attention_impl=cfg.flag_use_pytorch_attention_impl).to(device)
+        model = GPT(config, flag_use_pytorch_attention_impl=cfg.flags.flag_use_pytorch_attention_impl).to(device)
     with setup_timer.phase("tokenize_data"):
         data = prepare(source, tokenizer, max_train_chars=TOKENIZER_TEXT_MAX_CHARS if args.tokenizer_text_only else None)
 
@@ -206,7 +206,8 @@ def main():
         name = f"{name}_{args.suffix}"
     with setup_timer.phase("wandb_init"):
         run = wandb.init(project="gpt-experiments", name=name, group=args.group, config={
-            "main_config": asdict(cfg),
+            # Flat, as it was before the config was split into sections, so that existing runs and views line up.
+            "main_config": {**asdict(cfg.train), **asdict(cfg.model), **asdict(cfg.flags)},
             "model_config": asdict(config),
             "_args": vars(args),
             "_debug": {"train_chars": data.train_chars, "device": device, "training_dtype_override": dtype},
@@ -222,13 +223,13 @@ def main():
         }
 
     batch_fns: dict[Split, BatchFn] = {
-        "train": lambda generator: get_batch(data.train, cfg.batch_size, cfg.block_size, generator),
-        "validation": lambda generator: get_batch(data.validation, cfg.batch_size, cfg.block_size, generator),
+        "train": lambda generator: get_batch(data.train, cfg.train.batch_size, cfg.model.block_size, generator),
+        "validation": lambda generator: get_batch(data.validation, cfg.train.batch_size, cfg.model.block_size, generator),
     }
 
     train_timer = PhaseTimer(enabled=args.profile, sync=True)
     with setup_timer.phase("train"):
-        model = train(cfg, cfg.train_steps, model, batch_fns, device, run, train_timer, dtype, metrics_hook=bpc_hook)
+        model = train(cfg.train, cfg.train.train_steps, model, batch_fns, device, run, train_timer, dtype, metrics_hook=bpc_hook)
 
     with setup_timer.phase("save_checkpoint"):
         checkpoint_path = save_checkpoint(model, run_id, tokenizer)
