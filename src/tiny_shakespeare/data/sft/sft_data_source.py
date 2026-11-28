@@ -29,9 +29,9 @@ class SFTDataSource(ABC):
     def iter_examples(self, split: Split) -> Iterator[SftExample]:
         """The examples of one split, one SftExample each."""
 
-    def get_eval_examples(self) -> dict[str, list[SftExample]]:
+    def get_validation_slices(self) -> dict[str, list[SftExample]]:
         """
-        The examples to evaluate a finetuned model on, by category name (e.g. "repeated_char"), so that its score can be reported per category.
-        A source with no eval set of its own returns nothing, and then there's nothing to score.
+        Validation examples sliced by subtask, by the subtask's name (e.g. "repeated_char"), so that a finetuned model's progress can be watched per subtask.
+        A source with no slices of its own returns nothing, and then there's nothing to score.
         """
         return {}
