@@ -32,6 +32,7 @@ class ReverseSource(SFTDataSource):
     def iter_examples(self, split: Split) -> Iterator[SftExample]:
         yield from _parse_examples(self._read(split), self._path(split))
 
+    @override
     def get_eval_examples(self) -> dict[str, list[SftExample]]:
         """
         Returns a dict of file name ("repeated_char") to list of eval examples.
