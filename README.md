@@ -17,7 +17,8 @@ What I did:
 - I then implemented a simple character tokenizer and a character-level byte-pair encoding tokenizer by hand, following Karpathy's [Let's build the GPT Tokenizer](https://www.youtube.com/watch?v=zduSFxRajkE).
 - He then goes on to describe a regex-based-splitting approach that GPT-4 uses; I implement that by hand as well at a few different vocab sizes.
 - I try it out on the [tiny-shakespeare](https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt) dataset, but it overfits.
-- Following some AI refactors, I then try it out on the [TinyStoriesV2](https://huggingface.co/datasets/roneneldan/TinyStories/blob/main/TinyStoriesV2-GPT4-train.txt) dataset and watch performance improve as expected as BPE vocab size increases (the graph on the left above).
+- After some AI-assisted refactors, I then try it out on the [TinyStoriesV2](https://huggingface.co/datasets/roneneldan/TinyStories/blob/main/TinyStoriesV2-GPT4-train.txt) dataset and watch performance improve as expected as BPE vocab size increases (the graph on the left above).
+- After some AI-assisted synthetic data generation and refactors, I run supervised finetuning on the task of string reversal on assistant-like prompt/response pairs and watch it reach 99+% per-token accuracy.
 
 ## Lab notebook
 
@@ -325,3 +326,4 @@ Added a supervised finetuning component to see how well it learns string reversa
 
 This consisted of a train + validation slices, after noticing that it does worse at strings with repeated characters. There is probably something off with the scoring of repeated characters having to do with the fact that all characters are the same, but :shrug:
 
+![](assets/2026-11-27-sft-plot.png)
