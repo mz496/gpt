@@ -45,6 +45,8 @@ class UnslicedSource(SFTDataSource):
 
 class FakeRun:
     id = "fake"
+    entity = "fake-entity"
+    project = "fake-project"
 
     def __init__(self) -> None:
         self.logged: list[tuple[int, dict[str, float]]] = []
@@ -124,3 +126,70 @@ def test_sft_finetunes_and_scores_with_the_builtin_attention(run: FakeRun, monke
 
     (model,) = loaded
     assert [m.flag_use_pytorch_attention_impl for m in model.modules() if isinstance(m, MultiHeadAttentionParallelHeads)] == [True]
+
+
+# --- putting the run in a wandb view
+
+class ViewCalls:
+    """Replaces show_run_in_view in sft(): records how it was called, and whether the wandb run was finished by then. Raises `error` if given one."""
+
+    def __init__(self, run: FakeRun, error: Exception | None = None):
+        self.run, self.error = run, error
+        self.calls: list[tuple[object, ...]] = []
+        self.finished_at_call: list[bool] = []
+
+    def __call__(self, entity: str, project: str, run_id: str, slice_names: list[str], create_name: str | None, view_id: str | None) -> str:
+        self.calls.append((entity, project, run_id, slice_names, create_name, view_id))
+        self.finished_at_call.append(self.run.finished)
+        if self.error is not None:
+            raise self.error
+        return view_id or "new-view"
+
+
+def test_with_a_name_for_a_view_the_finished_run_is_put_in_a_new_view_of_the_slices(run: FakeRun, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    view_calls = ViewCalls(run)
+    monkeypatch.setattr(sft_module, "show_run_in_view", view_calls)
+
+    sft_module.sft("base", SlicedSource(), CONFIG, create_view="my-view")
+
+    assert view_calls.calls == [("fake-entity", "fake-project", "fake", ["easy", "hard"], "my-view", None)]
+    assert view_calls.finished_at_call == [True], "wandb doesn't know the run until it is finished"
+    assert "https://wandb.ai/fake-entity/fake-project?nw=new-view" in capsys.readouterr().out
+
+
+def test_with_the_id_of_a_view_the_run_is_added_to_it(run: FakeRun, monkeypatch: pytest.MonkeyPatch) -> None:
+    view_calls = ViewCalls(run)
+    monkeypatch.setattr(sft_module, "show_run_in_view", view_calls)
+
+    sft_module.sft("base", SlicedSource(), CONFIG, view_id="v7")
+
+    assert view_calls.calls == [("fake-entity", "fake-project", "fake", ["easy", "hard"], None, "v7")]
+
+
+def test_a_source_with_no_slices_makes_a_view_of_the_pool_alone(run: FakeRun, monkeypatch: pytest.MonkeyPatch) -> None:
+    view_calls = ViewCalls(run)
+    monkeypatch.setattr(sft_module, "show_run_in_view", view_calls)
+
+    sft_module.sft("base", UnslicedSource(), CONFIG, create_view="my-view")
+
+    assert view_calls.calls[0][3] == []
+
+
+def test_without_a_view_flag_wandb_views_are_left_alone(run: FakeRun, monkeypatch: pytest.MonkeyPatch) -> None:
+    view_calls = ViewCalls(run)
+    monkeypatch.setattr(sft_module, "show_run_in_view", view_calls)
+
+    sft_module.sft("base", SlicedSource(), CONFIG)
+
+    assert view_calls.calls == []
+
+
+def test_a_failure_to_make_the_view_does_not_fail_the_run(run: FakeRun, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setattr(sft_module, "show_run_in_view", ViewCalls(run, error=RuntimeError("wandb is down")))
+
+    run_id = sft_module.sft("base", SlicedSource(), CONFIG, create_view="my-view")
+
+    output = capsys.readouterr().out
+    assert Path("checkpoints", run_id, "model.pt").is_file(), "the checkpoint was saved before the view"
+    assert "could not put the run in a wandb view" in output and "wandb is down" in output
+    assert output.strip().splitlines()[-1] == f"run_id={run_id}"

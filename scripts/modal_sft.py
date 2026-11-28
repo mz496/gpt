@@ -5,6 +5,8 @@ Finetunes a training run's checkpoint on a Modal GPU worker. Arguments are forwa
 
 (which runs modal run scripts/modal_sft.py --run-id <run_id> --args "--suffix reverse1")
 The training settings come from configs/sft.yaml unless --config says otherwise; the model comes from the checkpoint.
+With --create-view <name> (no spaces) or --view-id <id>, the finished run is put in a wandb view of the validation slices, from inside the job, so that it also
+happens if the job was started with `modal run --detach` and the laptop is closed.
 
 The checkpoint is read from the "gpt-checkpoints" Modal volume, where scripts/modal_train.py wrote checkpoints/<run_id>/model.pt and tokenizer.json.
 The finetuned checkpoint is written to the same volume, and can be generated from with `just modal-generate <new run id>`.

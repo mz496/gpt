@@ -4,7 +4,7 @@ Set the color of a run in a saved workspace view. Colors are stored per view, so
 
 import argparse
 
-from scripts.wandb_views import add_common_args, load_view, normalize_hex, resolve_entity, set_run_color
+from src.tiny_shakespeare.wandb_views import add_common_args, load_view, normalize_hex, resolve_entity, set_run_color
 
 
 def main():

@@ -321,9 +321,7 @@ They went to the house and opened it at the box. It was a silly giant, and a fai
 
 ### Nov 19
 
-1. Retrain on char tokenizer
-2. Prepare data: generate the examples, tokenize them, and produce tokens, loss_mask and example_starts.
-3. Write get_sft_batch (window starts at example boundaries, targets masked with -100).
-4. Update train and make_eval_batches to take a batch function, and drop the bits-per-char logging for this path.
-5. Write sft.py: load the checkpoint, apply step 2, and call train.
-6. Update generate to use the shared prompt-building function, add a greedy option, and stop on <|im_end|>.
+Added a supervised finetuning component to see how well it learns string reversal. I was curious to see exactly how quickly it learns and it was surprisingly fast, basically just as fast as the pretraining! (GPT-3 already showed this as well.)
+
+This consisted of a train + validation slices, after noticing that it does worse at strings with repeated characters. There is probably something off with the scoring of repeated characters having to do with the fact that all characters are the same, but :shrug:
+

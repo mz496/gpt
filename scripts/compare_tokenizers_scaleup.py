@@ -14,7 +14,7 @@ The arguments are compare_tokenizers's (see its docstring); only the default vie
 import argparse
 
 from scripts.compare_tokenizers import build_specs, parse_args as parse_compare_args, run_comparison
-from scripts.wandb_views import resolve_entity
+from src.tiny_shakespeare.wandb_views import resolve_entity
 
 CONFIG = "scaleup"
 DEFAULT_NAME = "tokenizers-scaleup"

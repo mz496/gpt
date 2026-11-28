@@ -22,6 +22,19 @@ from .train import MetricsHook
 # Strings are reported in bins of this many lengths: 1-10, 11-20, and so on.
 LENGTH_BIN_WIDTH = 10
 
+# What make_validation_metrics_hook logs: each of SLICE_METRICS for every slice, and each of POOLED_METRICS for all the rows together. The pool has no loss because
+# train() logs validation/loss itself, and a hook can't return a key that it logs. Whatever shows these (a wandb view) takes the names from here.
+SLICE_METRICS = ("exact_match", "token_acc", "loss")
+POOLED_METRICS = ("exact_match", "token_acc")
+
+
+def slice_metric_key(slice_name: str, metric: str) -> str:
+    return f"validation/{slice_name}/{metric}"
+
+
+def pooled_metric_key(metric: str) -> str:
+    return f"validation/{metric}"
+
 
 @dataclass(frozen=True)
 class RowScores:
@@ -179,13 +192,13 @@ def make_validation_metrics_hook(slices: dict[str, SftData], device: str, valida
         metrics: dict[str, float] = {}
         for name, scores in by_slice.items():
             summary = summarize(scores)
-            metrics[f"validation/{name}/exact_match"] = summary.exact_match
-            metrics[f"validation/{name}/token_acc"] = summary.token_acc
-            metrics[f"validation/{name}/loss"] = summary.loss
-        metrics["validation/exact_match"] = pooled.exact_match
-        metrics["validation/token_acc"] = pooled.token_acc
+            metrics[slice_metric_key(name, "exact_match")] = summary.exact_match
+            metrics[slice_metric_key(name, "token_acc")] = summary.token_acc
+            metrics[slice_metric_key(name, "loss")] = summary.loss
+        metrics[pooled_metric_key("exact_match")] = pooled.exact_match
+        metrics[pooled_metric_key("token_acc")] = pooled.token_acc
 
-        per_slice = "".join(f"{name} {metrics[f'validation/{name}/exact_match']:.3f} | " for name in by_slice)
+        per_slice = "".join(f"{name} {metrics[slice_metric_key(name, 'exact_match')]:.3f} | " for name in by_slice)
         print(f"step={step:04d} exact_match: {per_slice}all {pooled.exact_match:.3f}")
         return metrics
 

@@ -6,7 +6,7 @@ import argparse
 
 import wandb
 
-from scripts.wandb_views import add_common_args, resolve_entity
+from src.tiny_shakespeare.wandb_views import add_common_args, resolve_entity
 
 
 def main():

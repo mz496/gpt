@@ -41,7 +41,7 @@ from pathlib import Path
 
 import wandb
 
-from scripts.wandb_views import DEFAULT_PROJECT, add_run, create_view, load_view, resolve_entity, set_run_color
+from src.tiny_shakespeare.wandb_views import DEFAULT_PROJECT, add_run, create_view, load_view, resolve_entity, set_run_color
 
 # Tailwind v3 hex values (without the #).
 AMBER_600 = "d97706"

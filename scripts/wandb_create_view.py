@@ -4,7 +4,7 @@ Create an empty saved workspace view and print only its view id (the nw= value i
 
 import argparse
 
-from scripts.wandb_views import add_common_args, create_view, resolve_entity
+from src.tiny_shakespeare.wandb_views import add_common_args, create_view, resolve_entity
 
 
 def main():
