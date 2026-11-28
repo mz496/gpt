@@ -3,12 +3,12 @@
 train:
   train_steps: 1500
   train_seed: 1337
-  eval_seed: 1338
   batch_size: 64
   learning_rate: 3.0e-4
-  eval_iters: 50
-  # Smaller than eval_iters to bound activation memory at this model size.
-  eval_chunk_size: 10
+  estimate_loss_seed: 1338
+  estimate_loss_iters: 50
+  # Smaller than estimate_loss_iters to bound activation memory at this model size.
+  estimate_loss_chunk_size: 10
 
 model:
   n_embd: 384

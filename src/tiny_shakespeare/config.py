@@ -14,22 +14,22 @@ class TrainConfig:
     train_steps: int
     # Seeds weight init and dropout (global RNG), and the generator that picks training batches.
     train_seed: int
-    # Seeds the generator that picks the (fixed) batches used for loss estimation.
-    eval_seed: int
     # how many independent sequences will we look at in parallel?
     batch_size: int
     learning_rate: float
+    # Seeds the generator that picks the (fixed) batches used for loss estimation.
+    estimate_loss_seed: int
     # for loss estimation: how many batches to estimate over
-    eval_iters: int
+    estimate_loss_iters: int
     # for loss estimation: how many of those batches to run in parallel (as one concatenated batch) per forward pass.
-    # Fewer, bigger forwards are faster when launch-bound, but activation memory grows with it. eval_chunk_size == eval_iters means "all at once".
-    eval_chunk_size: int
+    # Fewer, bigger forwards are faster when launch-bound, but activation memory grows with it. estimate_loss_chunk_size == estimate_loss_iters means "all at once".
+    estimate_loss_chunk_size: int
 
     def __post_init__(self):
-        if self.eval_chunk_size < 1:
-            raise ValueError(f"eval_chunk_size must be >= 1, got {self.eval_chunk_size}")
-        if self.eval_chunk_size > self.eval_iters:
-            raise ValueError(f"eval_chunk_size {self.eval_chunk_size} greater than eval_iters {self.eval_iters} is meaningless")
+        if self.estimate_loss_chunk_size < 1:
+            raise ValueError(f"estimate_loss_chunk_size must be >= 1, got {self.estimate_loss_chunk_size}")
+        if self.estimate_loss_chunk_size > self.estimate_loss_iters:
+            raise ValueError(f"estimate_loss_chunk_size {self.estimate_loss_chunk_size} greater than estimate_loss_iters {self.estimate_loss_iters} is meaningless")
 
 
 @dataclass(frozen=True)

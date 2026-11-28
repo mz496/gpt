@@ -22,7 +22,7 @@ def autocast_dtype() -> torch.dtype | None:
         return torch.bfloat16
     return None
 
-EvalBatches = dict[Split, list[tuple[torch.Tensor, torch.Tensor]]]
+EstimateLossBatches = dict[Split, list[tuple[torch.Tensor, torch.Tensor]]]
 
 # Draws one (contexts, targets) batch of [B, T] int64 CPU tensors, using the given generator for all of its randomness.
 # The data, batch size and block size are already bound in, so that train() doesn't need to know what kind of data it is training on.
@@ -31,31 +31,31 @@ BatchFn = Callable[[torch.Generator], tuple[torch.Tensor, torch.Tensor]]
 # Called at each loss estimate with (step, model, the losses from estimate_loss); returns extra metrics to log next to the losses.
 MetricsHook = Callable[[int, GPT, dict[Split, float]], dict[str, float]]
 
-def make_eval_batches(cfg: TrainConfig, batch_fns: dict[Split, BatchFn], device: str) -> EvalBatches:
+def make_estimate_loss_batches(cfg: TrainConfig, batch_fns: dict[Split, BatchFn], device: str) -> EstimateLossBatches:
     """
-    Build the cfg.eval_iters (contexts, targets) batches used for loss estimation, per dataset split (the keys of batch_fns), grouped into chunks.
+    Build the cfg.estimate_loss_iters (contexts, targets) batches used for loss estimation, per dataset split (the keys of batch_fns), grouped into chunks.
 
-    Each chunk concatenates up to cfg.eval_chunk_size consecutive batches along the batch dimension, so that estimate_loss can run a single forward per chunk.
-    The last chunk is smaller when eval_iters isn't a multiple of eval_chunk_size.
+    Each chunk concatenates up to cfg.estimate_loss_chunk_size consecutive batches along the batch dimension, so that estimate_loss can run a single forward per chunk.
+    The last chunk is smaller when estimate_loss_iters isn't a multiple of estimate_loss_chunk_size.
 
-    The batches are the same for every estimate (and for every model): each dataset gets a fresh generator seeded with cfg.eval_seed.
+    The batches are the same for every estimate (and for every model): each dataset gets a fresh generator seeded with cfg.estimate_loss_seed.
     This makes estimates comparable across steps and across model implementations, and independent of dropout/init randomness.
     Since they never change, we build them once up front instead of on every estimate.
     """
-    result: EvalBatches = {}
+    result: EstimateLossBatches = {}
     for dataset_type, batch_fn in batch_fns.items():
-        generator = torch.Generator().manual_seed(cfg.eval_seed)
-        batches = [batch_fn(generator) for _ in range(cfg.eval_iters)]
+        generator = torch.Generator().manual_seed(cfg.estimate_loss_seed)
+        batches = [batch_fn(generator) for _ in range(cfg.estimate_loss_iters)]
         result[dataset_type] = [
             (torch.cat([contexts for contexts, _ in chunk]).to(device), torch.cat([targets for _, targets in chunk]).to(device))
-            for chunk in (batches[i:i + cfg.eval_chunk_size] for i in range(0, len(batches), cfg.eval_chunk_size))
+            for chunk in (batches[i:i + cfg.estimate_loss_chunk_size] for i in range(0, len(batches), cfg.estimate_loss_chunk_size))
         ]
     return result
 
 @torch.no_grad
-def estimate_loss(model: torch.nn.Module, eval_batches: EvalBatches, dtype: torch.dtype | None = None) -> dict[Split, float]:
+def estimate_loss(model: torch.nn.Module, batches: EstimateLossBatches, dtype: torch.dtype | None = None) -> dict[Split, float]:
     """
-    Estimate loss over train, validation as the mean loss over the fixed batches from make_eval_batches.
+    Estimate loss over train, validation as the mean loss over the fixed batches from make_estimate_loss_batches.
 
     Each chunk's loss is a mean over that chunk's tokens, so we weight by the chunk's number of samples to get the exact mean over all tokens
     (chunks differ in size only when the last one is smaller due to divisibility).
@@ -64,7 +64,7 @@ def estimate_loss(model: torch.nn.Module, eval_batches: EvalBatches, dtype: torc
     """
     model.eval()
     result: dict[Split, float] = {}
-    for dataset_type, chunks in eval_batches.items():
+    for dataset_type, chunks in batches.items():
         # Compute the mean per dataset type.
         # model(contexts, targets) outputs (logits, loss) where loss is 0-dim float
         # Everything stays on-device (model, contexts, targets, losses) until the single .item() at the end, so there is no sync per chunk.
@@ -106,8 +106,8 @@ def train(
     optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.learning_rate, fused=True)
     # Generator for training batches, so the order of training data doesn't depend on how much randomness dropout consumes.
     train_generator = torch.Generator().manual_seed(cfg.train_seed)
-    # Cache the batches (where the batch count = cfg.eval_iters) of the train/val sets in order to estimate loss over the whole sets, for reuse in the hot loop.
-    eval_batches = make_eval_batches(cfg, batch_fns, device)
+    # Cache the batches (where the batch count = cfg.estimate_loss_iters) of the train/val sets in order to estimate loss over the whole sets, for reuse in the hot loop.
+    estimate_loss_batches = make_estimate_loss_batches(cfg, batch_fns, device)
     for step in range(step_count):
         # Zero out gradients for this iteration.
         with timer.phase("zero_grad"):
@@ -124,7 +124,7 @@ def train(
         # An untrained model is near-uniform over C tokens, so loss should start near ~ln(C)
         if step % 50 == 0 or step == step_count-1:
             with timer.phase("estimate_loss"):
-                losses = estimate_loss(model, eval_batches, dtype)
+                losses = estimate_loss(model, estimate_loss_batches, dtype)
             print(f"step={step:04d} loss={losses}")
             metrics = {
                 "train/loss": losses["train"],

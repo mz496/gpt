@@ -10,11 +10,11 @@ VALID = """
 train:
   train_steps: 10
   train_seed: 1
-  eval_seed: 2
   batch_size: 4
   learning_rate: 1.0e-3
-  eval_iters: 5
-  eval_chunk_size: 5
+  estimate_loss_seed: 2
+  estimate_loss_iters: 5
+  estimate_loss_chunk_size: 5
 model:
   n_embd: 8
   n_head: 2
@@ -64,7 +64,7 @@ def test_default_and_scaleup_keep_the_values_they_had_before_the_split() -> None
 
 def test_load_config_puts_each_key_in_its_section(write_config: Callable[[str], str]) -> None:
     config = load_config(write_config(VALID))
-    assert config.train == TrainConfig(train_steps=10, train_seed=1, eval_seed=2, batch_size=4, learning_rate=1.0e-3, eval_iters=5, eval_chunk_size=5)
+    assert config.train == TrainConfig(train_steps=10, train_seed=1, estimate_loss_seed=2, batch_size=4, learning_rate=1.0e-3, estimate_loss_iters=5, estimate_loss_chunk_size=5)
     assert config.model == ModelConfig(n_embd=8, n_head=2, n_layer=1, block_size=16, dropout=0.1)
     assert config.flags == FlagConfig(flag_use_parallel_heads=True, flag_use_pytorch_attention_impl=False)
 
@@ -87,18 +87,18 @@ def test_a_missing_or_extra_section_raises(write_config: Callable[[str], str]) -
 def test_a_key_in_the_wrong_section_or_missing_raises(write_config: Callable[[str], str]) -> None:
     # block_size belongs to model, not train.
     with pytest.raises(TypeError):
-        load_config(write_config(VALID.replace("  eval_chunk_size: 5\n", "  eval_chunk_size: 5\n  block_size: 16\n")))
+        load_config(write_config(VALID.replace("  estimate_loss_chunk_size: 5\n", "  estimate_loss_chunk_size: 5\n  block_size: 16\n")))
     with pytest.raises(TypeError):
         load_config(write_config(VALID.replace("  n_layer: 1\n", "")))
 
 
-def train_config(eval_chunk_size: int) -> TrainConfig:
-    return TrainConfig(train_steps=1, train_seed=1, eval_seed=1, batch_size=1, learning_rate=1.0, eval_iters=5, eval_chunk_size=eval_chunk_size)
+def train_config(estimate_loss_chunk_size: int) -> TrainConfig:
+    return TrainConfig(train_steps=1, train_seed=1, estimate_loss_seed=1, batch_size=1, learning_rate=1.0, estimate_loss_iters=5, estimate_loss_chunk_size=estimate_loss_chunk_size)
 
 
 def test_train_config_rejects_a_chunk_size_that_makes_no_sense() -> None:
-    with pytest.raises(ValueError, match="eval_chunk_size"):
+    with pytest.raises(ValueError, match="estimate_loss_chunk_size"):
         train_config(0)
-    with pytest.raises(ValueError, match="eval_chunk_size"):
+    with pytest.raises(ValueError, match="estimate_loss_chunk_size"):
         train_config(6)
     train_config(5)

@@ -20,19 +20,19 @@ BATCH_SIZE = 4
 BLOCK_SIZE = 8
 LEARNING_RATE = 1e-3
 # for loss estimation
-EVAL_ITERS = 200
+ESTIMATE_LOSS_ITERS = 200
 
 @torch.no_grad
 def estimate_loss(model: torch.nn.Module, tokenized_train_data: np.ndarray[Any, Any], tokenized_val_data: np.ndarray[Any, Any], device: str) -> dict[str, float]:
     """
-    Estimate loss over train, validation based on EVAL_ITERS batches.
+    Estimate loss over train, validation based on ESTIMATE_LOSS_ITERS batches.
     """
     model.eval()
     result: dict[str, float] = {}
     for dataset_type, data in [("train", tokenized_train_data), ("validation", tokenized_val_data)]:
         # Compute the mean per dataset type.
-        losses = torch.zeros(EVAL_ITERS)
-        for k in range(EVAL_ITERS):
+        losses = torch.zeros(ESTIMATE_LOSS_ITERS)
+        for k in range(ESTIMATE_LOSS_ITERS):
             contexts, targets = get_batch(data, BATCH_SIZE, BLOCK_SIZE)
             contexts, targets = contexts.to(device), targets.to(device)
             _logits, loss = model(contexts, targets)
