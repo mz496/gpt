@@ -1,3 +1,5 @@
+import sys
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -5,8 +7,9 @@ import torch
 
 from src.tiny_shakespeare.data.sft.sft_data_source import SftExample
 from src.tiny_shakespeare.data.special_tokens import END_OF_TEXT, IM_END, IM_START
+from src.tiny_shakespeare.models.gpt import generate as generate_module
 from src.tiny_shakespeare.models.gpt.generate import generate_response
-from src.tiny_shakespeare.models.gpt.model import GPT, GPTConfig
+from src.tiny_shakespeare.models.gpt.model import GPT, GPTConfig, MultiHeadAttentionParallelHeads, load_checkpoint, save_checkpoint
 from src.tiny_shakespeare.tokenizers.char_tokenizer import CharTokenizer
 
 VOCAB_SIZE = 6
@@ -133,3 +136,23 @@ def test_generate_response_rejects_a_request_that_leaves_no_room_to_answer(token
     model = make_model(tokenizer, block_size=8)
     with pytest.raises(ValueError, match="block_size"):
         generate_response(model, tokenizer, "hello", max_tokens=5, greedy=True, device="cpu")
+
+
+def test_the_generate_command_runs_the_model_with_the_builtin_attention(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)  # checkpoints are read from the relative path checkpoints/<run_id>/
+    tokenizer = CharTokenizer.from_state({"vocab": list("\nabc"), "special_tokens": []})
+    save_checkpoint(GPT(GPTConfig(vocab_size=4, n_embd=8, n_head=2, n_layer=1, block_size=8, dropout=0.0)), "run", tokenizer)
+    loaded: list[GPT] = []
+
+    def spy(run_id: str, device: str, flag_use_pytorch_attention_impl: bool = False) -> GPT:
+        model = load_checkpoint(run_id, device, flag_use_pytorch_attention_impl=flag_use_pytorch_attention_impl)
+        loaded.append(model)
+        return model
+
+    monkeypatch.setattr(generate_module, "load_checkpoint", spy)
+    monkeypatch.setattr(generate_module, "get_device", lambda: "cpu")
+    monkeypatch.setattr(sys, "argv", ["generate", "run", "--max-tokens", "3", "--greedy"])
+    generate_module.main()
+
+    (model,) = loaded
+    assert [m.flag_use_pytorch_attention_impl for m in model.modules() if isinstance(m, MultiHeadAttentionParallelHeads)] == [True]

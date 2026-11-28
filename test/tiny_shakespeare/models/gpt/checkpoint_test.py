@@ -6,6 +6,7 @@ import torch
 from src.tiny_shakespeare.models.gpt.model import (
     GPT,
     GPTConfig,
+    MultiHeadAttentionParallelHeads,
     checkpoint_tokenizer_path,
     load_checkpoint,
     load_checkpoint_tokenizer,
@@ -80,3 +81,38 @@ def test_the_saved_model_generates_the_same_as_before_saving() -> None:
     actual = reloaded.generate(idx, max_tokens=10)
 
     assert torch.equal(expected, actual)
+
+
+def attention_flags(model: GPT) -> list[bool]:
+    return [module.flag_use_pytorch_attention_impl for module in model.modules() if isinstance(module, MultiHeadAttentionParallelHeads)]
+
+
+def test_a_loaded_model_uses_the_attention_it_is_asked_to_and_the_handrolled_one_by_default() -> None:
+    tokenizer = trained("char")
+    save_checkpoint(small_model(tokenizer), "run", tokenizer)
+
+    assert attention_flags(load_checkpoint("run", "cpu")) == [False]
+    assert attention_flags(load_checkpoint("run", "cpu", flag_use_pytorch_attention_impl=True)) == [True]
+
+
+def test_the_two_attentions_compute_the_same_thing_on_the_same_weights() -> None:
+    tokenizer = trained("char")
+    torch.manual_seed(0)  # pyright: ignore[reportUnknownMemberType] Bad torch type stubs.
+    save_checkpoint(small_model(tokenizer), "run", tokenizer)
+    handrolled, builtin = load_checkpoint("run", "cpu"), load_checkpoint("run", "cpu", flag_use_pytorch_attention_impl=True)
+
+    idx = torch.randint(0, len(tokenizer.get_vocab()), (3, 4))
+    with torch.no_grad():
+        expected, actual = handrolled(idx, None)[0], builtin(idx, None)[0]
+    # The same function, so it differs by no more than rounding.
+    assert torch.allclose(expected, actual, atol=1e-5)
+
+
+def test_the_flag_does_nothing_for_a_checkpoint_without_parallel_heads() -> None:
+    tokenizer = trained("char")
+    config = GPTConfig(vocab_size=len(tokenizer.get_vocab()), n_embd=8, n_head=2, n_layer=1, block_size=4, dropout=0.0, flag_use_parallel_heads=False)
+    save_checkpoint(GPT(config), "run", tokenizer)
+
+    idx = torch.randint(0, len(tokenizer.get_vocab()), (2, 4))
+    with torch.no_grad():
+        assert torch.equal(load_checkpoint("run", "cpu")(idx, None)[0], load_checkpoint("run", "cpu", flag_use_pytorch_attention_impl=True)(idx, None)[0])

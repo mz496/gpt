@@ -35,7 +35,8 @@ def sft(checkpoint_run_id: str, data_source: SFTDataSource, cfg: TrainConfig, su
     """Finetunes the checkpoint on the data source and saves the result as a new checkpoint. Returns the new run's id."""
     device = get_device()
     print(f"available device: {device}")
-    model = load_checkpoint(checkpoint_run_id, device)
+    # Use pytorch attention for the finetune train and the validation checks.
+    model = load_checkpoint(checkpoint_run_id, device, flag_use_pytorch_attention_impl=True)
     tokenizer = load_checkpoint_tokenizer(checkpoint_run_id)
     check_checkpoint(model, tokenizer)
 

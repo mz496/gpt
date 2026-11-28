@@ -538,20 +538,19 @@ def save_checkpoint(model: GPT, run_id: str, tokenizer: Tokenizer) -> Path:
     }, path)
     return path
 
-def load_checkpoint(run_id: str, device: str) -> GPT:
+def load_checkpoint(run_id: str, device: str, flag_use_pytorch_attention_impl: bool = False) -> GPT:
     """
     Reads the checkpoint written by save_checkpoint into a fresh model on `device`, in eval mode.
     The architecture comes from the config saved in the checkpoint.
+
+    How attention is computed isn't part of the architecture (it's the same function and weights either way, only the speed differs), so a checkpoint doesn't
+    store it, hence `flag_use_pytorch_attention_impl`.
     """
     path = checkpoint_path(run_id)
     if not path.is_file():
         raise FileNotFoundError(f"checkpoint not found: {path}")
     saved = torch.load(path, map_location=device, weights_only=True)
-    # TODO: respect flag_use_pytorch_attention_impl. It isn't part of the architecture, so a checkpoint doesn't store it, and a loaded model always gets the
-    # default here: the slower handrolled attention, even if it was trained with the built-in one. That includes the model that sft() finetunes, and the ones
-    # that generate and the validation metrics score. Take it as an argument (keeping the default as it is, so that checkpoint_test.py still compares like
-    # with like) and pass True from those callers.
-    model = GPT(GPTConfig(**saved["config"])).to(device)
+    model = GPT(GPTConfig(**saved["config"]), flag_use_pytorch_attention_impl=flag_use_pytorch_attention_impl).to(device)
     model.load_state_dict(saved["state_dict"])
     model.eval()
     return model

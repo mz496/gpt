@@ -10,7 +10,7 @@ from src.tiny_shakespeare.data.data_source import Split
 from src.tiny_shakespeare.data.sft.sft_data_source import SFTDataSource, SftExample
 from src.tiny_shakespeare.data.special_tokens import END_OF_TEXT, IM_END, IM_START
 from src.tiny_shakespeare.models.gpt import sft as sft_module
-from src.tiny_shakespeare.models.gpt.model import GPT, GPTConfig, save_checkpoint
+from src.tiny_shakespeare.models.gpt.model import GPT, GPTConfig, MultiHeadAttentionParallelHeads, load_checkpoint, save_checkpoint
 from src.tiny_shakespeare.tokenizers.char_tokenizer import CharTokenizer
 
 TRAIN = [SftExample(s, s[::-1]) for s in ["abc", "cab", "bca", "abba", "cbbc", "aabb", "bbaa", "cacb"]]
@@ -109,3 +109,18 @@ def test_a_source_with_no_slices_still_gets_the_pooled_score_of_its_validation_s
     report = report_lines(capsys.readouterr().out)
     assert [line.split()[0] for line in report] == ["validation", "1-10", "all"]
     assert report[0].split()[1].endswith("/5") and report[-1].split()[1].endswith("/5")
+
+
+def test_sft_finetunes_and_scores_with_the_builtin_attention(run: FakeRun, monkeypatch: pytest.MonkeyPatch) -> None:
+    loaded: list[GPT] = []
+
+    def spy(run_id: str, device: str, flag_use_pytorch_attention_impl: bool = False) -> GPT:
+        model = load_checkpoint(run_id, device, flag_use_pytorch_attention_impl=flag_use_pytorch_attention_impl)
+        loaded.append(model)
+        return model
+
+    monkeypatch.setattr(sft_module, "load_checkpoint", spy)
+    sft_module.sft("base", SlicedSource(), CONFIG)
+
+    (model,) = loaded
+    assert [m.flag_use_pytorch_attention_impl for m in model.modules() if isinstance(m, MultiHeadAttentionParallelHeads)] == [True]

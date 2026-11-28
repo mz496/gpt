@@ -40,7 +40,7 @@ def main():
     device = get_device()
     print(f"available device: {device}")
 
-    model = load_checkpoint(args.run_id, device)
+    model = load_checkpoint(args.run_id, device, flag_use_pytorch_attention_impl=True)
     # Raises if the checkpoint has no tokenizer.
     tokenizer = load_checkpoint_tokenizer(args.run_id)
     if len(tokenizer.get_vocab()) != model.config.vocab_size:
