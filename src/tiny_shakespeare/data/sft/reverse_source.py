@@ -5,6 +5,21 @@ from ..data_source import Split
 from .sft_data_source import SFTDataSource, SftExample
 
 SFT_DIR = Path(__file__).parent
+# The directory of the eval set: one file per category, the file's name (without .txt) being the category. See reverse_eval_gen.py.
+EVAL_DIRNAME = "reverse-eval"
+
+def _parse_examples(text: str, path: Path) -> Iterator[SftExample]:
+    """The examples in the text of a file, one `<string>\\t<reversed string>` per line. Raises, naming the line, if one is malformed or isn't a reversal."""
+    if not text:
+        return
+    for line_number, line in enumerate(text.removesuffix("\n").split("\n"), start=1):
+        parts = line.split("\t")
+        if len(parts) != 2:
+            raise ValueError(f"{path}:{line_number}: expected '<string>\\t<reversed string>', got {line!r}")
+        string, reversed_string = parts
+        if reversed_string != string[::-1]:
+            raise ValueError(f"{path}:{line_number}: {reversed_string!r} is not the reverse of {string!r}")
+        yield SftExample(input=string, output=reversed_string)
 
 class ReverseSource(SFTDataSource):
     """
@@ -15,18 +30,24 @@ class ReverseSource(SFTDataSource):
 
     @override
     def iter_examples(self, split: Split) -> Iterator[SftExample]:
-        text = self._read(split)
-        if not text:
-            return
-        path = self._path(split)
-        for line_number, line in enumerate(text.removesuffix("\n").split("\n"), start=1):
-            parts = line.split("\t")
-            if len(parts) != 2:
-                raise ValueError(f"{path}:{line_number}: expected '<string>\\t<reversed string>', got {line!r}")
-            string, reversed_string = parts
-            if reversed_string != string[::-1]:
-                raise ValueError(f"{path}:{line_number}: {reversed_string!r} is not the reverse of {string!r}")
-            yield SftExample(input=string, output=reversed_string)
+        yield from _parse_examples(self._read(split), self._path(split))
+
+    def get_eval_examples(self) -> dict[str, list[SftExample]]:
+        """
+        Returns a dict of file name ("repeated_char") to list of eval examples.
+        """
+        eval_dir = SFT_DIR / EVAL_DIRNAME
+        if not eval_dir.is_dir():
+            raise FileNotFoundError(f"no eval set at {eval_dir}; make it with `python -m src.tiny_shakespeare.data.sft.reverse_eval_gen`")
+        splits: dict[str, list[SftExample]] = {}
+        for path in sorted(eval_dir.glob("*.txt")):
+            examples = list(_parse_examples(path.read_text(encoding="utf-8"), path))
+            if not examples:
+                raise ValueError(f"{path} has no examples, so its category can't be scored")
+            splits[path.stem] = examples
+        if not splits:
+            raise ValueError(f"{eval_dir} has no category files (<category>.txt)")
+        return splits
 
     def _path(self, split: Split) -> Path:
         return SFT_DIR / f"reverse-{split}.txt"

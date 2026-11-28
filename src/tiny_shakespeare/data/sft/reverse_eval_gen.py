@@ -12,14 +12,13 @@ import random
 from pathlib import Path
 
 from src.tiny_shakespeare.data.sft.reverse_gen import CATEGORIES, classify, lengths_for, make, write_examples
-from src.tiny_shakespeare.data.sft.reverse_source import ReverseSource
+from src.tiny_shakespeare.data.sft.reverse_source import EVAL_DIRNAME, ReverseSource
 
 EVAL_SEED = 2718  # not the seed of the train/validation generator, so the streams of random numbers are unrelated
 PER_CATEGORY = 300
 # Give up on a length after this many tries in a row that found no new string (e.g. length 1 has 26 strings in all, and the train/validation files use them).
 MAX_FAILED_ATTEMPTS = 5000
 OUT_DIR = Path(__file__).parent
-EVAL_DIRNAME = "reverse-eval"
 
 def used_strings() -> set[str]:
     """Every string in the train and validation files."""
