@@ -547,6 +547,10 @@ def load_checkpoint(run_id: str, device: str) -> GPT:
     if not path.is_file():
         raise FileNotFoundError(f"checkpoint not found: {path}")
     saved = torch.load(path, map_location=device, weights_only=True)
+    # TODO: respect flag_use_pytorch_attention_impl. It isn't part of the architecture, so a checkpoint doesn't store it, and a loaded model always gets the
+    # default here: the slower handrolled attention, even if it was trained with the built-in one. That includes the model that sft() finetunes, and the ones
+    # that generate and the validation metrics score. Take it as an argument (keeping the default as it is, so that checkpoint_test.py still compares like
+    # with like) and pass True from those callers.
     model = GPT(GPTConfig(**saved["config"])).to(device)
     model.load_state_dict(saved["state_dict"])
     model.eval()
